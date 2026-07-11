@@ -36,25 +36,26 @@ clients/
 |---|---|---|
 | `POST /webhook/github` | Tar emot GitHub org-webhooken (PR-events, m.fl.) | HMAC-SHA256-signatur (`X-Hub-Signature-256`) |
 | `POST /webhook/heartbeat` | VPS/tjänst postar sin status | `Authorization: Bearer <HEARTBEAT_SECRET>` |
-| `GET /coderabbit-quota` | Rullande 60-min-räkning av granskningstriggrande händelser | ingen (internt bruk — lägg bakom Access om det exponeras publikt) |
-| `GET /vps-status` | Senast kända status per källa | ingen (samma som ovan) |
+| `GET /coderabbit-quota` | Rullande 60-min-räkning av granskningstriggrande händelser | `Authorization: Bearer <QUERY_SECRET>` |
+| `GET /vps-status` | Senast kända status per källa | `Authorization: Bearer <QUERY_SECRET>` |
 
 ## Setup
 
 1. `cd worker && npm install`
 2. `wrangler d1 create ops-hub-db` — klistra in `database_id` i `wrangler.jsonc`
 3. `npm run db:migrate:remote`
-4. `wrangler secret put GITHUB_WEBHOOK_SECRET` — valfri sträng, samma används i steg 6
+4. `wrangler secret put GITHUB_WEBHOOK_SECRET` — valfri sträng, samma används i steg 7
 5. `wrangler secret put HEARTBEAT_SECRET` — valfri sträng, delas till VPS:arna
-6. `npm run deploy`
-7. Skapa en **organisationswebhook** på `github.com/organizations/blixten85/settings/hooks`:
-   - Payload URL: `https://ops-hub.<konto>.workers.dev/webhook/github`
+6. `wrangler secret put QUERY_SECRET` — valfri sträng, delas till allt som ska läsa `/coderabbit-quota` eller `/vps-status`
+7. Sätt `routes: [{ pattern: "ops-hub.<din-zon>", custom_domain: true }]` i `wrangler.jsonc` — **inte** `workers.dev`, den delade domänen blockeras av Cloudflares eget bot-skydd på kanten (bekräftat 2026-07-11, requesten når aldrig Workerns kod). `npm run deploy`.
+8. `blixten85` är ett **personkonto**, inte en Organization — GitHub stödjer inga konto-breda webhooks för personkonton. Skapa en webhook **per repo** istället (loop över `gh api repos/{owner}/{repo}/hooks -X POST ...`):
+   - Payload URL: `https://ops-hub.<din-zon>/webhook/github`
    - Content type: `application/json`
    - Secret: samma som steg 4
    - Events: minst `Pull requests`, `Issue comments`, `Check runs`
-8. På varje VPS (t.ex. mp100), lägg till en cron-rad:
+9. På varje VPS (t.ex. mp100), lägg till en cron-rad:
    ```
-   */5 * * * * HEARTBEAT_SECRET=... OPS_HUB_URL=https://ops-hub.<konto>.workers.dev /path/to/clients/heartbeat.sh mp100
+   */5 * * * * HEARTBEAT_SECRET=$(cat /path/to/secret) OPS_HUB_URL=https://ops-hub.<din-zon> /path/to/clients/heartbeat.sh mp100
    ```
 
 ## CodeRabbits eget API — rättad förståelse (2026-07-11)
