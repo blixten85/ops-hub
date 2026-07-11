@@ -57,22 +57,61 @@ clients/
    */5 * * * * HEARTBEAT_SECRET=... OPS_HUB_URL=https://ops-hub.<konto>.workers.dev /path/to/clients/heartbeat.sh mp100
    ```
 
-## Varför inget CodeRabbit-eget API används
+## CodeRabbits eget API — rättad förståelse (2026-07-11)
 
-Undersökt 2026-07-11: CodeRabbit exponerar inget utgående webhook eller API
-för granskningsstatus/kö/kvot (deras "webhooks"-funktion är för att DE ska
-ta emot händelser från GitLab/Bitbucket, inte tvärtom). Lösningen ovan
-approximerar kvotanvändning genom att räkna GitHub-händelser som sannolikt
-triggar en granskning (`pull_request.opened/synchronize/reopened`,
-`@coderabbitai review`-kommentarer) — samma signal CodeRabbit själv agerar
-på, bara observerad från utsidan via GitHub istället för CodeRabbit direkt.
-Kvotgränsen (5/timme, Pro-plan, kontogemensam) är hårdkodad i
-`handleCodeRabbitQuota` — uppdatera om planen ändras.
+**Tidigare fel i denna README:** vi trodde inledningsvis att CodeRabbit
+saknade ett API helt. Det stämmer inte. CodeRabbit har ett dokumenterat
+REST-API:
 
-Granskningens FÄRDIGSTATUS (klar/inte klar) är däremot direkt observerbar
-via GitHub: CodeRabbit postar en vanlig `check_run` med namnet `CodeRabbit`
-på varje PR, som redan fångas av `/webhook/github` (event-typ
-`check_run.completed` m.fl.) — ingen approximation behövs där.
+```
+GET https://api.coderabbit.ai/v1/metrics/reviews?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+Header: x-coderabbitai-api-key: cr-xxxxxxxxxx
+```
+
+- Parametrar: `organization_ids`, `repository_ids`, `user_ids` (kommaseparerat,
+  max 10 st), `format=json|csv`, `limit` (default 1000), `cursor` (paginering)
+- Svar per PR: `pr_url`, `created_at`, `ready_for_review_at`,
+  `first_human_review_at`, `last_commit_at`, `merged_at`, `author_*`,
+  `organization_*`, `repository_*`, `estimated_complexity` (1–5),
+  `estimated_review_minutes`, samt `coderabbit_comments` uppdelat på
+  **allvarlighetsgrad** (critical/major/minor/trivial/info) och
+  **kategori** (security_and_privacy, performance_and_scalability,
+  functional_correctness, maintainability_and_code_quality,
+  data_integrity_and_integration, stability_and_availability) — vardera
+  med posted/accepted-antal.
+- Rate limit på API:et självt: **10 requests/min** (`X-RateLimit-*`-headers).
+- Dokumenterat som **Enterprise-only** — men vi fick ändå ut denna exakta
+  datastruktur (bekräftat via en användaruppladdad CSV som matchar schemat
+  fält för fält) på ett Pro-konto, troligen via en export-knapp på
+  dashboardens "Summary"-sida snarare än den råa API-nyckeln. Overifierat
+  om Pro-planen ger API-nyckelåtkomst också — testa genom att skapa en
+  nyckel i dashboarden och köra ett anrop.
+
+**Vad detta INTE ger:** ingen realtidsstatus för pågående/köade
+granskningar — bara historik för MERGADE PR:er, retroaktivt. Bekräftat i
+CodeRabbits egen dokumentation ("no in-progress or queued review
+endpoints exist"). Vår ursprungliga lösning (räkna GitHub-händelser som
+sannolikt triggar en granskning, i ett rullande 60-min-fönster) är alltså
+FORTFARANDE nödvändig för `/coderabbit-quota` — CodeRabbits eget API kan
+inte ersätta den, bara komplettera med rikare efterhandsstatistik.
+
+**Möjlig utökning:** en periodisk cron-jobb (t.ex. dagligen) som hämtar
+`/v1/metrics/reviews` för föregående dygn och skriver in i en ny D1-tabell
+(`coderabbit_review_stats`) skulle ge oss exakta siffror på faktisk
+kommentarvolym/allvarlighetsgrad per repo över tid — användbart för att
+t.ex. se vilka repon som genererar flest kritiska fynd, eller om ett
+repos PR:er systematiskt dröjer länge innan första granskning (ett tecken
+på att de träffar rate-limit-kön, vilket redan setts i verklig data: en
+`bastion`-PR hade ~15 timmar mellan `created_at` och `first_human_review_at`
+under den period stagger-schemat saknades). INTE implementerat än — kräver
+en API-nyckel skapad manuellt i CodeRabbit-dashboarden (agenten har inte
+den åtkomsten).
+
+Granskningens FÄRDIGSTATUS (klar/inte klar) för en SPECIFIK, aktuell PR är
+enklast observerad via GitHub direkt: CodeRabbit postar en vanlig
+`check_run` med namnet `CodeRabbit` på varje PR, som redan fångas av
+`/webhook/github` (event-typ `check_run.completed` m.fl.) — ingen
+CodeRabbit-API-nyckel behövs för det.
 
 ## Utökning till fler leverantörer
 
