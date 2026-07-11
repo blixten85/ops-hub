@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ops-hub",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-01",
+  "vars": {
+    // Hostnamnsdel av GitHub org-appen (informativt, inte hemligt)
+    "GITHUB_ORG": "blixten85"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ops-hub-db",
+      "database_id": "REPLACE_ME_AFTER_wrangler_d1_create"
+    }
+  ]
+  // Secrets (wrangler secret put, körs manuellt av användaren):
+  //   GITHUB_WEBHOOK_SECRET — delad hemlighet satt när org-webhooken skapas
+  //   HEARTBEAT_SECRET      — delad hemlighet för /webhook/heartbeat (mp100, VPS:ar postar med denna)
+}
