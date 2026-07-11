@@ -11,8 +11,11 @@
     {
       "binding": "DB",
       "database_name": "ops-hub-db",
-      "database_id": "REPLACE_ME_AFTER_wrangler_d1_create"
+      "database_id": "5942ecca-cac7-4658-a8a5-5a60733da6c8"
     }
+  ],
+  "routes": [
+    { "pattern": "ops-hub.denied.se", "custom_domain": true }
   ]
   // Secrets (wrangler secret put, körs manuellt av användaren):
   //   GITHUB_WEBHOOK_SECRET — delad hemlighet satt när org-webhooken skapas

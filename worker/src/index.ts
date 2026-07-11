@@ -3,6 +3,11 @@ export interface Env {
   GITHUB_ORG: string;
   GITHUB_WEBHOOK_SECRET: string;
   HEARTBEAT_SECRET: string;
+  QUERY_SECRET: string;
+}
+
+function isAuthorizedQuery(req: Request, env: Env): boolean {
+  return req.headers.get("authorization") === `Bearer ${env.QUERY_SECRET}`;
 }
 
 // GitHub-händelser som sannolikt startar (eller kan starta) en CodeRabbit-
@@ -138,9 +143,11 @@ export default {
       return handleHeartbeat(req, env);
     }
     if (req.method === "GET" && url.pathname === "/coderabbit-quota") {
+      if (!isAuthorizedQuery(req, env)) return new Response("unauthorized", { status: 401 });
       return handleCodeRabbitQuota(env);
     }
     if (req.method === "GET" && url.pathname === "/vps-status") {
+      if (!isAuthorizedQuery(req, env)) return new Response("unauthorized", { status: 401 });
       return handleVpsStatus(env);
     }
     if (req.method === "GET" && url.pathname === "/") {
