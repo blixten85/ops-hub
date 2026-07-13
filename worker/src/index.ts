@@ -5,6 +5,10 @@ export interface Env {
   GITHUB_TOKEN: string;
   HEARTBEAT_SECRET: string;
   QUERY_SECRET: string;
+  CF_ADMIN_TOKEN: string;
+  CF_READONLY_TOKEN: string;
+  SLACK_BOT_TOKEN?: string;
+  SLACK_WEBHOOK_URL?: string;
 }
 
 function isAuthorizedQuery(req: Request, env: Env): boolean {
@@ -272,6 +276,316 @@ async function handleVpsStatus(env: Env): Promise<Response> {
   return Response.json({ sources: enriched });
 }
 
+// --- Slack-helper --------------------------------------------------------
+// Får ALDRIG kasta — notiser är best effort, övrig logik ska överleva.
+
+const SLACK_CHANNEL = "C0BD5U2RWD6";
+
+async function postSlack(env: Env, text: string): Promise<void> {
+  try {
+    if (env.SLACK_BOT_TOKEN) {
+      const res = await fetch("https://slack.com/api/chat.postMessage", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ channel: SLACK_CHANNEL, text }),
+      });
+      const json = (await res.json()) as { ok?: boolean; error?: string };
+      if (!json.ok) console.warn("slack: chat.postMessage misslyckades:", json.error);
+      return;
+    }
+    if (env.SLACK_WEBHOOK_URL) {
+      await fetch(env.SLACK_WEBHOOK_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      return;
+    }
+    console.warn("slack: varken SLACK_BOT_TOKEN eller SLACK_WEBHOOK_URL satt — meddelande ej skickat:", text);
+  } catch (e) {
+    console.warn("slack: post misslyckades:", e);
+  }
+}
+
+// --- Cloudflare API-helper ------------------------------------------------
+
+const CF_ACCOUNT_ID = "b74f8c0c6a92f3006483840cf27372fd";
+
+async function cfApi(token: string, method: string, path: string, body?: unknown): Promise<any> {
+  const res = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
+    method,
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const json = (await res.json()) as { success?: boolean; result?: unknown; errors?: unknown };
+  if (!json.success) {
+    throw new Error(`CF API ${method} ${path}: HTTP ${res.status} ${JSON.stringify(json.errors ?? [])}`);
+  }
+  return json.result;
+}
+
+// --- Token-underhåll (veckovis cron) ---------------------------------------
+// Porterad från timer-baserad molnrutin: förnyar Cloudflare account-tokens
+// som saknar utgångsdatum eller går ut inom 30 dagar → sätt exakt 1 år fram.
+// HÅRDA REGLER: rör ALDRIG token 7fe0985e91f909d888690eec40625612 (mp100-
+// server, avsiktligt utanför listan), DELETE:a aldrig någon token, och
+// PUT-kroppen måste bära befintlig policies-array oförändrad (annars
+// strippas åtkomsten tyst).
+
+const MANAGED_CF_TOKENS: { id: string; label: string }[] = [
+  { id: "4fc391e14c1126872116b94c56270674", label: "admin" },
+  { id: "6ce6b014c5e660147f0ed08e17f4cdd5", label: "deploy" },
+  { id: "468c30efcbecfd03b0c664b56b4862bd", label: "readonly" },
+];
+
+// GH_TOKEN (repo-secret i politiker-webapp, fine-grained PAT) går ut ~2026-09-21
+// och kan bara förnyas manuellt av en människa — varna i god tid.
+const GH_TOKEN_WARN_FROM = "2026-09-07";
+
+async function maintainCfTokens(env: Env): Promise<void> {
+  const lines: string[] = [];
+  const now = Date.now();
+  const thirtyDays = 30 * 24 * 3600 * 1000;
+  const renewDate = new Date(now);
+  renewDate.setUTCFullYear(renewDate.getUTCFullYear() + 1);
+  const newDateStr = renewDate.toISOString().slice(0, 10); // YYYY-MM-DD
+  const newExpiresOn = `${newDateStr}T23:59:59Z`;
+
+  for (const { id, label } of MANAGED_CF_TOKENS) {
+    try {
+      const token = await cfApi(env.CF_ADMIN_TOKEN, "GET", `/accounts/${CF_ACCOUNT_ID}/tokens/${id}`);
+      const expiresOn = token?.expires_on as string | null | undefined;
+      const needsRenewal = !expiresOn || new Date(expiresOn).getTime() - now < thirtyDays;
+      if (!needsRenewal) {
+        lines.push(`✅ ${label}: OK (går ut ${expiresOn!.slice(0, 10)})`);
+        continue;
+      }
+      // Uppdatera datummönstret "expires YYYY-MM-DD" i namnet om det finns.
+      const name = (token.name as string).replace(/expires \d{4}-\d{2}-\d{2}/, `expires ${newDateStr}`);
+      const putBody: Record<string, unknown> = {
+        name,
+        policies: token.policies, // MÅSTE skickas oförändrad — annars strippas åtkomst tyst
+        status: token.status,
+        expires_on: newExpiresOn,
+      };
+      if (token.condition) putBody.condition = token.condition;
+      if (token.not_before) putBody.not_before = token.not_before;
+      await cfApi(env.CF_ADMIN_TOKEN, "PUT", `/accounts/${CF_ACCOUNT_ID}/tokens/${id}`, putBody);
+      lines.push(`🔄 ${label}: förnyad till ${newDateStr} (var: ${expiresOn ? expiresOn.slice(0, 10) : "utan utgångsdatum"})`);
+    } catch (e) {
+      // Fel på enskild token → rapportera, krascha inte hela körningen.
+      lines.push(`❌ ${label} (${id.slice(0, 8)}…): ${String(e).slice(0, 200)}`);
+      console.error(`token-underhåll: ${label} misslyckades:`, e);
+    }
+  }
+
+  let text = lines.every((l) => l.startsWith("✅"))
+    ? `✅ Alla tokens OK\n${lines.join("\n")}`
+    : `🔧 Token-underhåll:\n${lines.join("\n")}`;
+
+  if (new Date().toISOString().slice(0, 10) >= GH_TOKEN_WARN_FROM) {
+    text +=
+      "\n\n⚠️ VARNING: repo-secreten GH_TOKEN (fine-grained PAT, politiker-webapp) går ut ~2026-09-21 " +
+      "och kan BARA förnyas manuellt:\n" +
+      "1. github.com/settings/personal-access-tokens → Generate new (fine-grained)\n" +
+      "2. Repository access: Only blixten85/politiker-webapp\n" +
+      "3. Permissions: Code scanning alerts (Read), Dependabot alerts (Read), Issues (Read/Write)\n" +
+      "4. Ge värdet till Claude för `gh secret set GH_TOKEN`";
+  }
+
+  await postSlack(env, text);
+}
+
+// --- Healthcheck politiker.denied.se (var 5:e min) --------------------------
+// Porterad från timer-baserad molnrutin. Slackar ENDAST vid transition
+// (OK→FAIL urgent med åtgärdsförslag, FAIL→OK återställt) + max en
+// påminnelse per 6h vid kvarstående FAIL. Daglig 07:00-summering separat.
+
+// Zon-id för politiker.denied.se: 9b017d0f7284906721545dcca5fdf61e (referens,
+// används inte av kontrollerna själva — allt går via account-scopade endpoints).
+const POLITIKER_D1_UUID = "e9ecf94f-fa71-4004-a5b8-f9317eb4d4e9";
+const POLITIKER_HOST = "politiker.denied.se";
+
+interface HealthResult {
+  id: string;
+  ok: boolean;
+  detail: string;
+  fix: string; // åtgärdsförslag vid FAIL
+}
+
+async function runHealthChecks(env: Env): Promise<HealthResult[]> {
+  const acc = CF_ACCOUNT_ID;
+  const checks: { id: string; fix: string; run: () => Promise<{ ok: boolean; detail: string }> }[] = [
+    {
+      id: "root_200",
+      fix: "Kontrollera Worker-deployen (wrangler tail politiker-webapp-app) och custom domain-routing.",
+      run: async () => {
+        const res = await fetch(`https://${POLITIKER_HOST}/`, { redirect: "manual" });
+        return { ok: res.status === 200, detail: `HTTP ${res.status}` };
+      },
+    },
+    {
+      id: "api_me_json",
+      fix: "API:t svarar inte med giltig JSON — kolla politiker-webapp-app-loggarna.",
+      run: async () => {
+        const res = await fetch(`https://${POLITIKER_HOST}/api/me`);
+        try {
+          await res.json();
+          return { ok: true, detail: `HTTP ${res.status}, giltig JSON` };
+        } catch {
+          return { ok: false, detail: `HTTP ${res.status}, ogiltig JSON` };
+        }
+      },
+    },
+    {
+      id: "domain_service",
+      fix:
+        "workers/domains pekar på fel Worker (känd bugg: -sender saknar fetch-handler → 500/1101). " +
+        `Peka om ${POLITIKER_HOST} till politiker-webapp-app.`,
+      run: async () => {
+        const result = ((await cfApi(
+          env.CF_READONLY_TOKEN,
+          "GET",
+          `/accounts/${acc}/workers/domains?domain=${POLITIKER_HOST}`
+        )) ?? []) as { hostname: string; service: string }[];
+        const entry = result.find((d) => d.hostname === POLITIKER_HOST);
+        return {
+          ok: entry?.service === "politiker-webapp-app",
+          detail: entry ? `service=${entry.service}` : "ingen domain-post hittad",
+        };
+      },
+    },
+    {
+      id: "scripts_exist",
+      fix: "Worker-script saknas — kontrollera senaste deployen av politiker-webapp.",
+      run: async () => {
+        const result = ((await cfApi(env.CF_READONLY_TOKEN, "GET", `/accounts/${acc}/workers/scripts`)) ?? []) as {
+          id: string;
+        }[];
+        const ids = result.map((s) => s.id);
+        const missing = ["politiker-webapp-app", "politiker-webapp-sender"].filter((n) => !ids.includes(n));
+        return { ok: missing.length === 0, detail: missing.length ? `saknas: ${missing.join(", ")}` : "båda finns" };
+      },
+    },
+    {
+      id: "d1_politicians",
+      fix: "politicians-tabellen är nära tom — möjlig dataförlust, återställ från senaste D1-backup/export.",
+      run: async () => {
+        const result = (await cfApi(
+          env.CF_READONLY_TOKEN,
+          "POST",
+          `/accounts/${acc}/d1/database/${POLITIKER_D1_UUID}/query`,
+          { sql: "SELECT COUNT(*) as n FROM politicians" }
+        )) as { results: { n: number }[] }[];
+        const n = result?.[0]?.results?.[0]?.n ?? 0;
+        return { ok: n >= 1000, detail: `${n} politiker` };
+      },
+    },
+    {
+      id: "access_apps",
+      fix:
+        "Access-konfig fel: publika sajten (roten) ska vara ogated och /admin-appen " +
+        "(politiker.denied.se/admin, /admin/*, /api/admin/*) ska finnas kvar — kolla Zero Trust → Applications.",
+      run: async () => {
+        const result = ((await cfApi(env.CF_READONLY_TOKEN, "GET", `/accounts/${acc}/access/apps`)) ?? []) as {
+          domain?: string;
+          self_hosted_domains?: string[];
+        }[];
+        const domains = result.flatMap((a) => [a.domain ?? "", ...(a.self_hosted_domains ?? [])]);
+        const rootGated = domains.some((d) => d === POLITIKER_HOST || d === `${POLITIKER_HOST}/`);
+        const adminExists = domains.some((d) => d.startsWith(`${POLITIKER_HOST}/admin`));
+        const problems: string[] = [];
+        if (rootGated) problems.push("roten är Access-grindad (ska vara publik)");
+        if (!adminExists) problems.push("/admin-appen saknas");
+        return { ok: !rootGated && adminExists, detail: problems.length ? problems.join("; ") : "OK" };
+      },
+    },
+  ];
+
+  const results: HealthResult[] = [];
+  for (const c of checks) {
+    try {
+      const { ok, detail } = await c.run();
+      results.push({ id: c.id, ok, detail, fix: c.fix });
+    } catch (e) {
+      results.push({ id: c.id, ok: false, detail: `kontrollen kraschade: ${String(e).slice(0, 200)}`, fix: c.fix });
+    }
+  }
+  return results;
+}
+
+const HEALTH_REMINDER_SECONDS = 6 * 3600;
+
+async function processHealthResults(env: Env, results: HealthResult[]): Promise<void> {
+  const now = Math.floor(Date.now() / 1000);
+  const failed: string[] = [];
+  const recovered: string[] = [];
+  const reminders: string[] = [];
+
+  for (const r of results) {
+    const prev = await env.DB.prepare(
+      `SELECT ok, since, last_alert FROM healthcheck_state WHERE check_id = ?`
+    )
+      .bind(r.id)
+      .first<{ ok: number; since: number; last_alert: number | null }>();
+    const prevOk = prev ? prev.ok === 1 : true; // saknad rad = anta tidigare OK, så första FAIL larmar
+
+    if (prevOk !== r.ok) {
+      await env.DB.prepare(
+        `INSERT INTO healthcheck_state (check_id, ok, since, last_alert, detail)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(check_id) DO UPDATE SET ok = excluded.ok, since = excluded.since,
+           last_alert = excluded.last_alert, detail = excluded.detail`
+      )
+        .bind(r.id, r.ok ? 1 : 0, now, r.ok ? null : now, r.detail)
+        .run();
+      if (r.ok) recovered.push(`• ${r.id}: ${r.detail}`);
+      else failed.push(`• ${r.id}: ${r.detail}\n  Åtgärd: ${r.fix}`);
+    } else if (!r.ok && prev && (prev.last_alert === null || now - prev.last_alert >= HEALTH_REMINDER_SECONDS)) {
+      await env.DB.prepare(`UPDATE healthcheck_state SET last_alert = ?, detail = ? WHERE check_id = ?`)
+        .bind(now, r.detail, r.id)
+        .run();
+      const hours = Math.round((now - prev.since) / 3600);
+      reminders.push(`• ${r.id}: fortfarande FAIL sedan ${hours}h (${r.detail})\n  Åtgärd: ${r.fix}`);
+    } else if (!prev) {
+      // Första körningen med OK-status — persistera utan att larma.
+      await env.DB.prepare(
+        `INSERT INTO healthcheck_state (check_id, ok, since, last_alert, detail) VALUES (?, 1, ?, NULL, ?)`
+      )
+        .bind(r.id, now, r.detail)
+        .run();
+    }
+  }
+
+  if (failed.length) {
+    await postSlack(env, `🚨 AKUT: politiker.denied.se — ${failed.length} kontroll(er) har gått från OK till FAIL:\n${failed.join("\n")}`);
+  }
+  if (reminders.length) {
+    await postSlack(env, `⏰ Påminnelse: politiker.denied.se har kvarstående fel:\n${reminders.join("\n")}`);
+  }
+  if (recovered.length) {
+    await postSlack(env, `✅ Återställt: politiker.denied.se — följande kontroller är gröna igen:\n${recovered.join("\n")}`);
+  }
+}
+
+async function dailyHealthSummary(env: Env): Promise<void> {
+  const results = await runHealthChecks(env);
+  const today = new Date().toISOString().slice(0, 10);
+  const red = results.filter((r) => !r.ok);
+  if (red.length === 0) {
+    await postSlack(env, `✅ politiker.denied.se: alla ${results.length} kontroller OK (${today})`);
+  } else {
+    const lines = red.map((r) => `• ${r.id}: ${r.detail}`);
+    await postSlack(
+      env,
+      `⚠️ politiker.denied.se daglig summering (${today}): ${red.length} av ${results.length} kontroller RÖDA:\n${lines.join("\n")}`
+    );
+  }
+}
+
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
@@ -302,5 +616,21 @@ export default {
       });
     }
     return new Response("not found", { status: 404 });
+  },
+
+  async scheduled(event: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
+    switch (event.cron) {
+      case "*/5 * * * *": // healthcheck politiker.denied.se
+        await processHealthResults(env, await runHealthChecks(env));
+        break;
+      case "0 7 * * *": // daglig summering (läser inte state, dubbelprocessar inga transitioner)
+        await dailyHealthSummary(env);
+        break;
+      case "0 7 * * 1": // veckovis token-underhåll
+        await maintainCfTokens(env);
+        break;
+      default:
+        console.warn("scheduled: okänt cron-uttryck:", event.cron);
+    }
   },
 } satisfies ExportedHandler<Env>;

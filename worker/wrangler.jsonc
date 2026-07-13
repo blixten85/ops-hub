@@ -16,9 +16,20 @@
   ],
   "routes": [
     { "pattern": "ops-hub.denied.se", "custom_domain": true }
-  ]
+  ],
+  "triggers": {
+    "crons": [
+      "*/5 * * * *", // healthcheck politiker.denied.se
+      "0 7 * * *", // daglig OK-summering (healthcheck)
+      "0 7 * * 1" // veckovis token-underhåll
+    ]
+  }
   // Secrets (wrangler secret put, körs manuellt av användaren):
   //   GITHUB_WEBHOOK_SECRET — delad hemlighet satt när org-webhooken skapas
   //   GITHUB_TOKEN          — PAT med repo-scope, används av auto-merge-armaren (GraphQL)
   //   HEARTBEAT_SECRET      — delad hemlighet för /webhook/heartbeat (mp100, VPS:ar postar med denna)
+  //   CF_ADMIN_TOKEN        — Cloudflare account-token med token-läs/skriv, för veckovisa token-underhållet
+  //   CF_READONLY_TOKEN     — Cloudflare readonly-token (Workers/D1/Access läs), för healthchecken
+  //   SLACK_BOT_TOKEN       — (valfri) Slack bot-token för chat.postMessage; fallback: SLACK_WEBHOOK_URL
+  //   SLACK_WEBHOOK_URL     — (valfri) Slack incoming webhook; saknas båda loggas notiser bara via console.warn
 }

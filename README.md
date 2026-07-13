@@ -29,6 +29,32 @@ leverantörer. Löser två saker som ett statiskt schema aldrig kan:
    BLOCKED/failing/konflikt skippas tyst; utfall loggas som
    `automerge.armed` respektive `automerge.merged_direct` i
    `events`-tabellen. Kräver secreten `GITHUB_TOKEN` (PAT, repo-scope).
+4. **Healthcheck politiker.denied.se** (cron var 5:e min) — sex kontroller:
+   roten svarar 200, `/api/me` ger giltig JSON, workers/domains pekar på
+   `politiker-webapp-app` (känd historisk bugg: pekade på `-sender` som
+   saknar fetch-handler → 500/1101), båda Worker-scripten finns,
+   `politicians`-tabellen i D1 har tusentals rader (nära noll =
+   dataförlust), samt Access-konfigen (publik rot ogated, /admin-appen
+   kvar). Status persisteras i `healthcheck_state`; Slack ENDAST vid
+   transition OK→FAIL (urgent, med åtgärdsförslag per kontroll) och
+   FAIL→OK (återställt), plus max en påminnelse per 6h vid kvarstående
+   fel. Daglig 07:00-summering ("✅ alla 6 kontroller OK" eller vad som
+   är rött). Kräver secreten `CF_READONLY_TOKEN`.
+5. **Token-underhåll** (cron måndagar 07:00) — förvaltar tre Cloudflare
+   account-tokens (admin/deploy/readonly): saknas `expires_on` eller
+   ligger den < 30 dagar bort sätts den till exakt 1 år framåt via PUT
+   (med befintlig `policies`-array oförändrad — annars strippas
+   åtkomsten tyst; datummönstret `expires YYYY-MM-DD` i namnet
+   uppdateras). Rör ALDRIG mp100-serverns token, DELETE:ar aldrig.
+   Postar alltid exakt ett Slack-meddelande med resultatet. Från
+   2026-09-07 inkluderas dessutom en varning om att repo-secreten
+   `GH_TOKEN` (fine-grained PAT, politiker-webapp, utgår ~2026-09-21)
+   måste förnyas manuellt av en människa. Kräver secreten
+   `CF_ADMIN_TOKEN`.
+
+Slack-notiser går via `SLACK_BOT_TOKEN` (chat.postMessage) med
+`SLACK_WEBHOOK_URL` som fallback; saknas båda loggas de bara i Workern
+(Slack-helpern kastar aldrig, övrig logik överlever alltid).
 
 ## Arkitektur
 
@@ -38,8 +64,8 @@ ovanpå — samma mönster andra kan följa för nya projekt.
 
 ```
 worker/
-  src/index.ts    — hela Workern: webhook-mottagning + frågeendpoints
-  schema.sql      — D1-schema (events + heartbeats)
+  src/index.ts    — hela Workern: webhook-mottagning + frågeendpoints + cron-handlers
+  schema.sql      — D1-schema (events + heartbeats + healthcheck_state)
   wrangler.jsonc  — Cloudflare-konfig
 clients/
   heartbeat.sh    — exempel-klient att köra via cron på en VPS
@@ -63,6 +89,9 @@ clients/
 5. `wrangler secret put HEARTBEAT_SECRET` — valfri sträng, delas till VPS:arna
 6. `wrangler secret put QUERY_SECRET` — valfri sträng, delas till allt som ska läsa `/coderabbit-quota` eller `/vps-status`
 6b. `wrangler secret put GITHUB_TOKEN` — PAT med repo-scope, används av auto-merge-armaren
+6c. `wrangler secret put CF_ADMIN_TOKEN` — Cloudflare account-token med token-läs/skriv, för veckovisa token-underhållet
+6d. `wrangler secret put CF_READONLY_TOKEN` — Cloudflare readonly-token (Workers/D1/Access läs), för healthchecken
+6e. `wrangler secret put SLACK_BOT_TOKEN` (eller `SLACK_WEBHOOK_URL`) — valfritt men krävs för att Slack-notiserna ska nå fram
 7. Sätt `routes: [{ pattern: "ops-hub.<din-zon>", custom_domain: true }]` i `wrangler.jsonc` — **inte** `workers.dev`, den delade domänen blockeras av Cloudflares eget bot-skydd på kanten (bekräftat 2026-07-11, requesten når aldrig Workerns kod). `npm run deploy`.
 8. `blixten85` är ett **personkonto**, inte en Organization — GitHub stödjer inga konto-breda webhooks för personkonton. Skapa en webhook **per repo** istället (loop över `gh api repos/{owner}/{repo}/hooks -X POST ...`):
    - Payload URL: `https://ops-hub.<din-zon>/webhook/github`

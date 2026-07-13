@@ -12,6 +12,16 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_received_at ON events(received_at);
 CREATE INDEX IF NOT EXISTS idx_events_coderabbit ON events(triggers_coderabbit, received_at);
 
+-- healthcheck_state: senaste status per healthcheck-kontroll (politiker.denied.se)
+-- används för transition-baserad alerting (Slacka bara vid OK→FAIL / FAIL→OK)
+CREATE TABLE IF NOT EXISTS healthcheck_state (
+  check_id TEXT PRIMARY KEY,     -- t.ex. 'root_200', 'd1_politicians'
+  ok INTEGER NOT NULL,           -- 1 = OK, 0 = FAIL
+  since INTEGER NOT NULL,        -- unix epoch: när nuvarande status började
+  last_alert INTEGER,            -- unix epoch: senaste Slack-larm för denna kontroll (NULL om OK)
+  detail TEXT                    -- senaste detaljbeskrivning
+);
+
 -- heartbeats: senast kända status per källa (VPS, tjänst, leverantör)
 CREATE TABLE IF NOT EXISTS heartbeats (
   source_id TEXT PRIMARY KEY,    -- t.ex. 'mp100', 'bastion-winvps', 'hostup-account'
