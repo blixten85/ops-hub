@@ -14,6 +14,17 @@ leverantörer. Löser två saker som ett statiskt schema aldrig kan:
    mp100 och andra servrar (cron, delad hemlighet). `GET /vps-status`
    visar senast sedd status per källa — grund för att senare koppla in
    riktiga ner/upp-notiser (t.ex. till Slack via Resend/webhook).
+3. **Auto-merge-armare** — webhook-driven ersättare för en timer-baserad
+   molnrutin. Vid `pull_request` (opened/synchronize/reopened/
+   ready_for_review) och `check_run` (completed, conclusion
+   success/skipped) kollas berörda öppna PR:er i `blixten85`-repon: är
+   PR:en öppen, inte draft, utan auto-merge och CLEAN (eller MERGEABLE
+   utan failing/pending checks) armas GitHubs nativa auto-merge (squash)
+   via GraphQL. Enda mutationen är auto-merge-flaggan (metadata-only,
+   triggar ingen CodeRabbit-granskning) — aldrig kommentarer, pushar,
+   force-merge eller branch protection-ändringar. BLOCKED/failing/
+   konflikt skippas tyst; armningar loggas som `automerge.armed` i
+   `events`-tabellen. Kräver secreten `GITHUB_TOKEN` (PAT, repo-scope).
 
 ## Arkitektur
 
@@ -47,6 +58,7 @@ clients/
 4. `wrangler secret put GITHUB_WEBHOOK_SECRET` — valfri sträng, samma används i steg 7
 5. `wrangler secret put HEARTBEAT_SECRET` — valfri sträng, delas till VPS:arna
 6. `wrangler secret put QUERY_SECRET` — valfri sträng, delas till allt som ska läsa `/coderabbit-quota` eller `/vps-status`
+6b. `wrangler secret put GITHUB_TOKEN` — PAT med repo-scope, används av auto-merge-armaren
 7. Sätt `routes: [{ pattern: "ops-hub.<din-zon>", custom_domain: true }]` i `wrangler.jsonc` — **inte** `workers.dev`, den delade domänen blockeras av Cloudflares eget bot-skydd på kanten (bekräftat 2026-07-11, requesten når aldrig Workerns kod). `npm run deploy`.
 8. `blixten85` är ett **personkonto**, inte en Organization — GitHub stödjer inga konto-breda webhooks för personkonton. Skapa en webhook **per repo** istället (loop över `gh api repos/{owner}/{repo}/hooks -X POST ...`):
    - Payload URL: `https://ops-hub.<din-zon>/webhook/github`

@@ -2,6 +2,7 @@ export interface Env {
   DB: D1Database;
   GITHUB_ORG: string;
   GITHUB_WEBHOOK_SECRET: string;
+  GITHUB_TOKEN: string;
   HEARTBEAT_SECRET: string;
   QUERY_SECRET: string;
 }
@@ -52,7 +53,121 @@ function triggersCodeRabbit(eventType: string, body: any): boolean {
   return false;
 }
 
-async function handleGitHubWebhook(req: Request, env: Env): Promise<Response> {
+// --- Auto-merge-armare -------------------------------------------------
+// Ersätter en timer-baserad molnrutin: armar GitHubs nativa auto-merge
+// (squash) på PR:er som är redo. ENDA tillåtna mutationen är auto-merge-
+// flaggan (metadata-only, triggar ingen CodeRabbit-granskning). Inga
+// kommentarer, pushar, force-merges eller branch protection-ändringar.
+
+const AUTOMERGE_PR_ACTIONS = ["opened", "synchronize", "reopened", "ready_for_review"];
+const AUTOMERGE_CHECK_CONCLUSIONS = ["success", "skipped"];
+
+async function githubGraphQL(env: Env, query: string, variables: Record<string, unknown>): Promise<any> {
+  const res = await fetch("https://api.github.com/graphql", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${env.GITHUB_TOKEN}`,
+      "content-type": "application/json",
+      "user-agent": "ops-hub-worker",
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+  if (!res.ok) throw new Error(`GitHub GraphQL HTTP ${res.status}`);
+  const json = (await res.json()) as { data?: any; errors?: { message: string }[] };
+  if (json.errors?.length) throw new Error(json.errors.map((e) => e.message).join("; "));
+  return json.data;
+}
+
+// Vilka PR-nummer i repot berörs av eventet? Tom lista = inget att göra.
+async function autoMergeCandidates(env: Env, eventType: string, body: any): Promise<number[]> {
+  if (body?.repository?.owner?.login !== env.GITHUB_ORG) return [];
+  if (eventType === "pull_request") {
+    const n = body?.pull_request?.number;
+    return AUTOMERGE_PR_ACTIONS.includes(body?.action) && typeof n === "number" ? [n] : [];
+  }
+  if (eventType === "check_run" && body?.action === "completed") {
+    if (!AUTOMERGE_CHECK_CONCLUSIONS.includes(body?.check_run?.conclusion)) return [];
+    const attached = (body.check_run.pull_requests ?? []) as { number: number }[];
+    if (attached.length > 0) return attached.map((p) => p.number);
+    // pull_requests[] är tomt för fork-PR:er — slå upp via head-SHA istället.
+    const sha = body.check_run.head_sha;
+    const res = await fetch(
+      `https://api.github.com/repos/${body.repository.full_name}/commits/${sha}/pulls`,
+      {
+        headers: {
+          authorization: `Bearer ${env.GITHUB_TOKEN}`,
+          accept: "application/vnd.github+json",
+          "user-agent": "ops-hub-worker",
+        },
+      }
+    );
+    if (!res.ok) return [];
+    const prs = (await res.json()) as { number: number; state: string }[];
+    return prs.filter((p) => p.state === "open").map((p) => p.number);
+  }
+  return [];
+}
+
+async function maybeArmAutoMerge(env: Env, repoFullName: string, prNumber: number): Promise<void> {
+  const [owner, name] = repoFullName.split("/");
+  const data = await githubGraphQL(
+    env,
+    `query($owner: String!, $name: String!, $number: Int!) {
+      repository(owner: $owner, name: $name) {
+        pullRequest(number: $number) {
+          id state isDraft mergeable mergeStateStatus
+          autoMergeRequest { enabledAt }
+          commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+        }
+      }
+    }`,
+    { owner, name, number: prNumber }
+  );
+  const pr = data?.repository?.pullRequest;
+  if (!pr) return;
+  // Redan armad → no-op (idempotens). Stängd/draft → skippa tyst.
+  if (pr.state !== "OPEN" || pr.isDraft || pr.autoMergeRequest) return;
+  const rollup = pr.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state ?? null;
+  const ready =
+    pr.mergeStateStatus === "CLEAN" ||
+    (pr.mergeable === "MERGEABLE" && (rollup === null || rollup === "SUCCESS"));
+  // BLOCKED/failing/konflikt/pending → skippa tyst, webhooken kommer igen.
+  if (!ready) return;
+  await githubGraphQL(
+    env,
+    `mutation($id: ID!) {
+      enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) {
+        clientMutationId
+      }
+    }`,
+    { id: pr.id }
+  );
+  await env.DB.prepare(
+    `INSERT INTO events (source, event_type, repo, triggers_coderabbit, payload, received_at)
+     VALUES ('ops-hub', 'automerge.armed', ?, 0, ?, unixepoch())`
+  )
+    .bind(repoFullName, JSON.stringify({ pr: prNumber }))
+    .run();
+}
+
+async function armAutoMergeForEvent(env: Env, eventType: string, body: any): Promise<void> {
+  try {
+    const repo = body?.repository?.full_name as string | undefined;
+    if (!repo) return;
+    for (const prNumber of await autoMergeCandidates(env, eventType, body)) {
+      try {
+        await maybeArmAutoMerge(env, repo, prNumber);
+      } catch (e) {
+        // Fel vid armning → logga och gå vidare, ingen retry-storm.
+        console.error(`automerge: ${repo}#${prNumber} failed:`, e);
+      }
+    }
+  } catch (e) {
+    console.error("automerge: candidate lookup failed:", e);
+  }
+}
+
+async function handleGitHubWebhook(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const raw = await req.text();
   const sig = req.headers.get("x-hub-signature-256");
   if (!(await verifyGitHubSignature(raw, sig, env.GITHUB_WEBHOOK_SECRET))) {
@@ -72,6 +187,8 @@ async function handleGitHubWebhook(req: Request, env: Env): Promise<Response> {
   )
     .bind(`${eventType}.${body?.action ?? ""}`, repo, triggers, payloadTrunc)
     .run();
+
+  ctx.waitUntil(armAutoMergeForEvent(env, eventType, body));
 
   return new Response("ok", { status: 202 });
 }
@@ -133,11 +250,11 @@ async function handleVpsStatus(env: Env): Promise<Response> {
 }
 
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
 
     if (req.method === "POST" && url.pathname === "/webhook/github") {
-      return handleGitHubWebhook(req, env);
+      return handleGitHubWebhook(req, env, ctx);
     }
     if (req.method === "POST" && url.pathname === "/webhook/heartbeat") {
       return handleHeartbeat(req, env);

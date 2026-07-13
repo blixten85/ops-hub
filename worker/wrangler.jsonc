@@ -19,5 +19,6 @@
   ]
   // Secrets (wrangler secret put, körs manuellt av användaren):
   //   GITHUB_WEBHOOK_SECRET — delad hemlighet satt när org-webhooken skapas
+  //   GITHUB_TOKEN          — PAT med repo-scope, används av auto-merge-armaren (GraphQL)
   //   HEARTBEAT_SECRET      — delad hemlighet för /webhook/heartbeat (mp100, VPS:ar postar med denna)
 }
