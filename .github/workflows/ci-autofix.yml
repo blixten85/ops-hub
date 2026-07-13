@@ -2,7 +2,7 @@ name: CI Autofix
 
 on:
   workflow_run:
-    workflows: ["Xcode-bygge (iOS + macOS)"]
+    workflows: ["CodeQL"]
     types: [completed]
 
 permissions:
