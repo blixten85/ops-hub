@@ -55,9 +55,11 @@ function triggersCodeRabbit(eventType: string, body: any): boolean {
 
 // --- Auto-merge-armare -------------------------------------------------
 // Ersätter en timer-baserad molnrutin: armar GitHubs nativa auto-merge
-// (squash) på PR:er som är redo. ENDA tillåtna mutationen är auto-merge-
-// flaggan (metadata-only, triggar ingen CodeRabbit-granskning). Inga
-// kommentarer, pushar, force-merges eller branch protection-ändringar.
+// (squash) på PR:er som är redo. Tillåtna mutationer: auto-merge-flaggan
+// (metadata-only, triggar ingen CodeRabbit-granskning) samt vanlig squash-
+// merge ENBART som fallback när GitHub vägrar arma en redan-CLEAN PR
+// (paritet med gamla rutinens `gh pr merge --auto`). Aldrig kommentarer,
+// pushar, force-merge/--admin eller branch protection-ändringar.
 
 const AUTOMERGE_PR_ACTIONS = ["opened", "synchronize", "reopened", "ready_for_review"];
 const AUTOMERGE_CHECK_CONCLUSIONS = ["success", "skipped"];
@@ -133,20 +135,41 @@ async function maybeArmAutoMerge(env: Env, repoFullName: string, prNumber: numbe
     (pr.mergeable === "MERGEABLE" && (rollup === null || rollup === "SUCCESS"));
   // BLOCKED/failing/konflikt/pending → skippa tyst, webhooken kommer igen.
   if (!ready) return;
-  await githubGraphQL(
-    env,
-    `mutation($id: ID!) {
-      enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) {
-        clientMutationId
-      }
-    }`,
-    { id: pr.id }
-  );
+  let outcome = "armed";
+  try {
+    await githubGraphQL(
+      env,
+      `mutation($id: ID!) {
+        enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) {
+          clientMutationId
+        }
+      }`,
+      { id: pr.id }
+    );
+  } catch (e) {
+    // GitHub vägrar arma auto-merge på PR:er som redan kan mergas direkt
+    // ("Pull request is in clean status"). Utan fallback fastnar en sådan
+    // PR för alltid — sista check_run-eventet har redan kommit. Paritet
+    // med gamla molnrutinens `gh pr merge --auto`: mergea direkt, ENDAST
+    // vid exakt detta fel och bekräftat CLEAN. Alla andra fel bubblar upp
+    // till logga-och-skippa.
+    if (!(/clean status/i.test(String(e)) && pr.mergeStateStatus === "CLEAN")) throw e;
+    await githubGraphQL(
+      env,
+      `mutation($id: ID!) {
+        mergePullRequest(input: { pullRequestId: $id, mergeMethod: SQUASH }) {
+          clientMutationId
+        }
+      }`,
+      { id: pr.id }
+    );
+    outcome = "merged_direct";
+  }
   await env.DB.prepare(
     `INSERT INTO events (source, event_type, repo, triggers_coderabbit, payload, received_at)
-     VALUES ('ops-hub', 'automerge.armed', ?, 0, ?, unixepoch())`
+     VALUES ('ops-hub', ?, ?, 0, ?, unixepoch())`
   )
-    .bind(repoFullName, JSON.stringify({ pr: prNumber }))
+    .bind(`automerge.${outcome}`, repoFullName, JSON.stringify({ pr: prNumber }))
     .run();
 }
 

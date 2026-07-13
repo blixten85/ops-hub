@@ -20,10 +20,14 @@ leverantörer. Löser två saker som ett statiskt schema aldrig kan:
    success/skipped) kollas berörda öppna PR:er i `blixten85`-repon: är
    PR:en öppen, inte draft, utan auto-merge och CLEAN (eller MERGEABLE
    utan failing/pending checks) armas GitHubs nativa auto-merge (squash)
-   via GraphQL. Enda mutationen är auto-merge-flaggan (metadata-only,
-   triggar ingen CodeRabbit-granskning) — aldrig kommentarer, pushar,
-   force-merge eller branch protection-ändringar. BLOCKED/failing/
-   konflikt skippas tyst; armningar loggas som `automerge.armed` i
+   via GraphQL. Mutationerna är auto-merge-flaggan (metadata-only,
+   triggar ingen CodeRabbit-granskning) samt — enbart när GitHub vägrar
+   arma en redan-CLEAN PR ("Pull request is in clean status", annars
+   fastnar den för alltid eftersom inga fler events kommer) — en vanlig
+   squash-merge, paritet med gamla rutinens `gh pr merge --auto`. Aldrig
+   kommentarer, pushar, force-merge eller branch protection-ändringar.
+   BLOCKED/failing/konflikt skippas tyst; utfall loggas som
+   `automerge.armed` respektive `automerge.merged_direct` i
    `events`-tabellen. Kräver secreten `GITHUB_TOKEN` (PAT, repo-scope).
 
 ## Arkitektur
