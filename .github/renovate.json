@@ -10,7 +10,7 @@
   "timezone": "Europe/Stockholm",
   "labels": ["dependencies", "renovate"],
   "rangeStrategy": "bump",
-  "lockFileMaintenance": { "enabled": true, "schedule": ["REPLACE_ME: samma värde som schedule nedan"] },
+  "lockFileMaintenance": { "enabled": true, "schedule": ["after 4:30am and before 5am on saturday"] },
   "vulnerabilityAlerts": { "enabled": true, "labels": ["security"] },
   "packageRules": [
     { "description": "Automerge patch updates on their own (kept out of any non-major group)", "matchUpdateTypes": ["patch"], "automerge": true },
@@ -18,7 +18,5 @@
   ],
   "prHourlyLimit": 2,
   "prConcurrentLimit": 10,
-  "schedule": [
-    "REPLACE_ME: t.ex. \"after 3am and before 3:30am on tuesday\" — SE staggerschemat i huvud-README innan du väljer ett värde, kollisioner med andra repons fönster äter CodeRabbits delade 5/timme-kvot"
-  ]
+  "schedule": ["after 4:30am and before 5am on saturday"]
 }
