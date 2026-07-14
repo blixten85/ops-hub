@@ -1,9 +1,13 @@
+import * as Sentry from "@sentry/cloudflare";
+
 export interface Env {
   DB: D1Database;
   GITHUB_ORG: string;
   GITHUB_WEBHOOK_SECRET: string;
   HEARTBEAT_SECRET: string;
   QUERY_SECRET: string;
+  // Sentry-felspårning (allmän, ej AI Agent Monitoring). Sätts som secret.
+  SENTRY_DSN?: string;
 }
 
 function isAuthorizedQuery(req: Request, env: Env): boolean {
@@ -132,35 +136,51 @@ async function handleVpsStatus(env: Env): Promise<Response> {
   return Response.json({ sources: enriched });
 }
 
-export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
-    const url = new URL(req.url);
+async function route(req: Request, env: Env): Promise<Response> {
+  const url = new URL(req.url);
 
-    if (req.method === "POST" && url.pathname === "/webhook/github") {
-      return handleGitHubWebhook(req, env);
-    }
-    if (req.method === "POST" && url.pathname === "/webhook/heartbeat") {
-      return handleHeartbeat(req, env);
-    }
-    if (req.method === "GET" && url.pathname === "/coderabbit-quota") {
-      if (!isAuthorizedQuery(req, env)) return new Response("unauthorized", { status: 401 });
-      return handleCodeRabbitQuota(env);
-    }
-    if (req.method === "GET" && url.pathname === "/vps-status") {
-      if (!isAuthorizedQuery(req, env)) return new Response("unauthorized", { status: 401 });
-      return handleVpsStatus(env);
-    }
-    if (req.method === "GET" && url.pathname === "/") {
-      return Response.json({
-        service: "ops-hub",
-        endpoints: [
-          "POST /webhook/github",
-          "POST /webhook/heartbeat",
-          "GET /coderabbit-quota",
-          "GET /vps-status",
-        ],
-      });
-    }
-    return new Response("not found", { status: 404 });
-  },
-} satisfies ExportedHandler<Env>;
+  if (req.method === "POST" && url.pathname === "/webhook/github") {
+    return handleGitHubWebhook(req, env);
+  }
+  if (req.method === "POST" && url.pathname === "/webhook/heartbeat") {
+    return handleHeartbeat(req, env);
+  }
+  if (req.method === "GET" && url.pathname === "/coderabbit-quota") {
+    if (!isAuthorizedQuery(req, env)) return new Response("unauthorized", { status: 401 });
+    return handleCodeRabbitQuota(env);
+  }
+  if (req.method === "GET" && url.pathname === "/vps-status") {
+    if (!isAuthorizedQuery(req, env)) return new Response("unauthorized", { status: 401 });
+    return handleVpsStatus(env);
+  }
+  if (req.method === "GET" && url.pathname === "/") {
+    return Response.json({
+      service: "ops-hub",
+      endpoints: [
+        "POST /webhook/github",
+        "POST /webhook/heartbeat",
+        "GET /coderabbit-quota",
+        "GET /vps-status",
+      ],
+    });
+  }
+  return new Response("not found", { status: 404 });
+}
+
+export default Sentry.withSentry(
+  (env: Env) => ({
+    dsn: env.SENTRY_DSN,
+    tracesSampleRate: 1.0,
+  }),
+  {
+    async fetch(req: Request, env: Env): Promise<Response> {
+      try {
+        return await route(req, env);
+      } catch (err) {
+        console.error(err);
+        Sentry.captureException(err);
+        return new Response("internal error", { status: 500 });
+      }
+    },
+  } satisfies ExportedHandler<Env>,
+);

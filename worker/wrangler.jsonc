@@ -3,6 +3,7 @@
   "name": "ops-hub",
   "main": "src/index.ts",
   "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
   "vars": {
     // Hostnamnsdel av GitHub org-appen (informativt, inte hemligt)
     "GITHUB_ORG": "blixten85"
@@ -20,4 +21,5 @@
   // Secrets (wrangler secret put, körs manuellt av användaren):
   //   GITHUB_WEBHOOK_SECRET — delad hemlighet satt när org-webhooken skapas
   //   HEARTBEAT_SECRET      — delad hemlighet för /webhook/heartbeat (mp100, VPS:ar postar med denna)
+  //   SENTRY_DSN            — allmän felspårning (ej AI Agent Monitoring), samma Sentry-projekt-mönster som product-describer-cloudflare
 }
