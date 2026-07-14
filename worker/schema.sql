@@ -32,6 +32,12 @@ CREATE TABLE IF NOT EXISTS notified_threads (
   UNIQUE(repo, pr_number)
 );
 
+-- Migration: koppla en notified_threads-rad till Slack-trådens ts, så att en
+-- tråd-repl från Slack (Events API) kan slås upp tillbaka till rätt repo+PR.
+-- OBS: ALTER TABLE ADD COLUMN är INTE idempotent (ingen IF NOT EXISTS i
+-- SQLite) — kör bara en gång mot en databas som saknar kolumnen.
+ALTER TABLE notified_threads ADD COLUMN slack_thread_ts TEXT;
+
 -- heartbeats: senast kända status per källa (VPS, tjänst, leverantör)
 CREATE TABLE IF NOT EXISTS heartbeats (
   source_id TEXT PRIMARY KEY,    -- t.ex. 'mp100', 'bastion-winvps', 'hostup-account'

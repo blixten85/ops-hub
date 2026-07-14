@@ -32,4 +32,5 @@
   //   CF_READONLY_TOKEN     — Cloudflare readonly-token (Workers/D1/Access läs), för healthchecken
   //   SLACK_BOT_TOKEN       — (valfri) Slack bot-token för chat.postMessage; fallback: SLACK_WEBHOOK_URL
   //   SLACK_WEBHOOK_URL     — (valfri) Slack incoming webhook; saknas båda loggas notiser bara via console.warn
+  //   SLACK_SIGNING_SECRET  — Slack-appens Signing Secret, verifierar POST /webhook/slack (Events API)
 }

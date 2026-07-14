@@ -9,6 +9,7 @@ export interface Env {
   CF_READONLY_TOKEN: string;
   SLACK_BOT_TOKEN?: string;
   SLACK_WEBHOOK_URL?: string;
+  SLACK_SIGNING_SECRET?: string;
 }
 
 function isAuthorizedQuery(req: Request, env: Env): boolean {
@@ -225,7 +226,14 @@ async function notifyOnCodeRabbitUnresolvedThread(env: Env, body: any): Promise<
       .run();
     if (!result.meta.changes) return; // redan notifierad senaste 30 min — undvik Slack-spam vid flera trådar
 
-    await postSlack(env, `🔍 CodeRabbit-fynd kräver beslut: ${repo}#${prNumber} — ${prUrl}`);
+    const ts = await postSlack(env, `🔍 CodeRabbit-fynd kräver beslut: ${repo}#${prNumber} — ${prUrl}`);
+    if (ts) {
+      await env.DB.prepare(
+        `UPDATE notified_threads SET slack_thread_ts = ? WHERE repo = ? AND pr_number = ?`
+      )
+        .bind(ts, repo, prNumber)
+        .run();
+    }
   } catch (e) {
     console.error(`pull_request_review_thread: notis misslyckades för ${body?.repository?.full_name}#${body?.pull_request?.number}:`, e);
   }
@@ -322,7 +330,11 @@ async function handleVpsStatus(env: Env): Promise<Response> {
 
 const SLACK_CHANNEL = "C0BD5U2RWD6";
 
-async function postSlack(env: Env, text: string): Promise<void> {
+// Returnerar postat meddelandes `ts` (Slack chat.postMessage-svar) om
+// SLACK_BOT_TOKEN är konfigurerat — används för att koppla trådsvar tillbaka
+// till rätt repo+PR. Incoming Webhook (SLACK_WEBHOOK_URL) ger ingen `ts`
+// tillbaka — trådkoppling hoppas då bara över, kraschar aldrig.
+async function postSlack(env: Env, text: string): Promise<string | null> {
   try {
     if (env.SLACK_BOT_TOKEN) {
       const res = await fetch("https://slack.com/api/chat.postMessage", {
@@ -333,9 +345,12 @@ async function postSlack(env: Env, text: string): Promise<void> {
         },
         body: JSON.stringify({ channel: SLACK_CHANNEL, text }),
       });
-      const json = (await res.json()) as { ok?: boolean; error?: string };
-      if (!json.ok) console.warn("slack: chat.postMessage misslyckades:", json.error);
-      return;
+      const json = (await res.json()) as { ok?: boolean; error?: string; ts?: string };
+      if (!json.ok) {
+        console.warn("slack: chat.postMessage misslyckades:", json.error);
+        return null;
+      }
+      return json.ts ?? null;
     }
     if (env.SLACK_WEBHOOK_URL) {
       await fetch(env.SLACK_WEBHOOK_URL, {
@@ -343,12 +358,130 @@ async function postSlack(env: Env, text: string): Promise<void> {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ text }),
       });
-      return;
+      console.warn("slack: SLACK_WEBHOOK_URL ger ingen ts — trådkoppling (Slack-svar → PR) hoppas över för detta meddelande");
+      return null;
     }
     console.warn("slack: varken SLACK_BOT_TOKEN eller SLACK_WEBHOOK_URL satt — meddelande ej skickat:", text);
+    return null;
   } catch (e) {
     console.warn("slack: post misslyckades:", e);
+    return null;
   }
+}
+
+// --- Slack Events API-mottagare (tråd-repl → @claude-kommentar på GitHub) --
+// Ren transport: EN allowlistad Slack-användare (operatören) kan svara i
+// tråden på en ops-hub-notis och få sin text vidarebefordrad som en
+// `@claude <text>`-kommentar på PR:en. Ingen egen AI-logik här, ingen bredare
+// auktorisering än den enda allowlist-kollen nedan — den installerade Claude
+// GitHub App:en gör allt faktiskt arbete på GitHub-sidan.
+//
+// SÄKERHETSKRAV (hårt, lades till efter att en tidigare version blockerades
+// av en säkerhetsklassificerare): utan denna koll skulle VEM SOM HELST som
+// kan skriva i kanalen kunna trigga en autonom kodändringspipeline mot
+// GitHub. Kollen MÅSTE köras innan något vidarebefordras, och en avvisning
+// får INTE avslöjas i Slack (svara bara 200 tyst, logga internt).
+
+const SLACK_ALLOWLISTED_USER = "U0BBTRUBHEK"; // operatörens Slack user-ID, verifierat manuellt
+
+async function verifySlackSignature(
+  raw: string,
+  timestampHeader: string | null,
+  signatureHeader: string | null,
+  signingSecret: string
+): Promise<boolean> {
+  if (!timestampHeader || !signatureHeader?.startsWith("v0=")) return false;
+  const timestamp = Number(timestampHeader);
+  if (!Number.isFinite(timestamp)) return false;
+  // Replay-skydd: avvisa om timestampen är >5 min från nu (Slacks rekommendation).
+  if (Math.abs(Date.now() / 1000 - timestamp) > 300) return false;
+
+  const base = `v0:${timestampHeader}:${raw}`;
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(signingSecret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(base));
+  const expected =
+    "v0=" +
+    Array.from(new Uint8Array(mac))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  if (expected.length !== signatureHeader.length) return false;
+  let diff = 0;
+  for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ signatureHeader.charCodeAt(i);
+  return diff === 0;
+}
+
+async function forwardSlackReplyToGitHub(env: Env, repo: string, prNumber: number, text: string): Promise<void> {
+  try {
+    const res = await fetch(`https://api.github.com/repos/${repo}/issues/${prNumber}/comments`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${env.GITHUB_TOKEN}`,
+        accept: "application/vnd.github+json",
+        "content-type": "application/json",
+        "user-agent": "ops-hub-worker",
+      },
+      body: JSON.stringify({ body: `@claude ${text}` }),
+    });
+    if (!res.ok) {
+      console.error(`slack->github: kommentar misslyckades för ${repo}#${prNumber}: HTTP ${res.status}`, await res.text());
+    }
+  } catch (e) {
+    console.error(`slack->github: kommentar misslyckades för ${repo}#${prNumber}:`, e);
+  }
+}
+
+async function handleSlackEventCallback(env: Env, ctx: ExecutionContext, event: any): Promise<void> {
+  if (event?.bot_id) return; // ignorera bot-meddelanden (inkl. ops-hubs egna notiser)
+  if (event?.type !== "message" && event?.type !== "app_mention") return;
+
+  // Hårt krav: enda auktoriseringskollen. Avvisning sker TYST — ingen
+  // indikation i Slack om att kontrollen existerar.
+  if (event?.user !== SLACK_ALLOWLISTED_USER) {
+    console.warn("slack: ignorerar meddelande från icke-allowlistad user", event?.user);
+    return;
+  }
+
+  const threadTs = event?.thread_ts as string | undefined;
+  const text = event?.text as string | undefined;
+  if (!threadTs || !text) return;
+
+  const row = await env.DB.prepare(
+    `SELECT repo, pr_number FROM notified_threads WHERE slack_thread_ts = ?`
+  )
+    .bind(threadTs)
+    .first<{ repo: string; pr_number: number }>();
+  if (!row) return; // svar i en tråd vi inte känner till — inget att koppla till
+
+  ctx.waitUntil(forwardSlackReplyToGitHub(env, row.repo, row.pr_number, text));
+}
+
+async function handleSlackWebhook(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const raw = await req.text();
+  const ok = await verifySlackSignature(
+    raw,
+    req.headers.get("x-slack-request-timestamp"),
+    req.headers.get("x-slack-signature"),
+    env.SLACK_SIGNING_SECRET ?? ""
+  );
+  if (!ok) return new Response("invalid signature", { status: 401 });
+
+  const body = JSON.parse(raw) as { type?: string; challenge?: string; event?: any };
+
+  if (body.type === "url_verification") {
+    return Response.json({ challenge: body.challenge });
+  }
+
+  if (body.type === "event_callback" && body.event) {
+    ctx.waitUntil(handleSlackEventCallback(env, ctx, body.event));
+  }
+
+  return new Response("ok", { status: 200 });
 }
 
 // --- Cloudflare API-helper ------------------------------------------------
@@ -637,6 +770,9 @@ export default {
     if (req.method === "POST" && url.pathname === "/webhook/heartbeat") {
       return handleHeartbeat(req, env);
     }
+    if (req.method === "POST" && url.pathname === "/webhook/slack") {
+      return handleSlackWebhook(req, env, ctx);
+    }
     if (req.method === "GET" && url.pathname === "/coderabbit-quota") {
       if (!isAuthorizedQuery(req, env)) return new Response("unauthorized", { status: 401 });
       return handleCodeRabbitQuota(env);
@@ -651,6 +787,7 @@ export default {
         endpoints: [
           "POST /webhook/github",
           "POST /webhook/heartbeat",
+          "POST /webhook/slack",
           "GET /coderabbit-quota",
           "GET /vps-status",
         ],

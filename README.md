@@ -69,6 +69,26 @@ Slack-notiser går via `SLACK_BOT_TOKEN` (chat.postMessage) med
 `SLACK_WEBHOOK_URL` som fallback; saknas båda loggas de bara i Workern
 (Slack-helpern kastar aldrig, övrig logik överlever alltid).
 
+7. **Slack → GitHub-relä (tråd-repl blir en `@claude`-kommentar)** — `POST
+   /webhook/slack` tar emot Slacks Events API (`message`/`app_mention`).
+   Svarar Slacks `url_verification`-handskakning direkt. Verifierar
+   `X-Slack-Signature`/`X-Slack-Request-Timestamp` mot `SLACK_SIGNING_SECRET`
+   (samma HMAC-mönster som GitHub-webhooken, fast Slacks `v0:{ts}:{body}`-
+   variant) och avvisar (401) ogiltig signatur eller >5 min gammal timestamp
+   (replay-skydd). Ett svar i tråden på en notis från punkt 6 ovan (matchat
+   via `notified_threads.slack_thread_ts`, satt när notisen postades) blir en
+   `@claude <text>`-kommentar på rätt PR — ren transport, ingen egen
+   AI-logik i ops-hub. **SÄKERHETSSPÄRR (medveten, inte en TODO): endast
+   Slack-användaren `U0BBTRUBHEK` (operatören) är allowlistad för
+   vidarebefordran.** Meddelanden från alla andra användare (och alla
+   bot-meddelanden) ignoreras tyst — 200 till Slack, inget svar som
+   avslöjar att kollen finns, bara en `console.warn`-logg internt. Detta
+   stänger en tidigare identifierad brist: utan kollen skulle vem som helst
+   som kan skriva i kanalen kunna trigga en autonom kodändringspipeline mot
+   GitHub. Kräver secreten `SLACK_SIGNING_SECRET` samt `SLACK_BOT_TOKEN`
+   (chat.postMessage — ger `ts` tillbaka, krävs för trådkoppling;
+   `SLACK_WEBHOOK_URL` räcker inte, den ger ingen `ts`).
+
 ## Arkitektur
 
 Byggt genom att klona [`repo-standard`](https://github.com/blixten85/repo-standard)
@@ -90,6 +110,7 @@ clients/
 |---|---|---|
 | `POST /webhook/github` | Tar emot GitHub org-webhooken (PR-events, m.fl.) | HMAC-SHA256-signatur (`X-Hub-Signature-256`) |
 | `POST /webhook/heartbeat` | VPS/tjänst postar sin status | `Authorization: Bearer <HEARTBEAT_SECRET>` |
+| `POST /webhook/slack` | Slack Events API — tråd-repl från en allowlistad användare vidarebefordras som `@claude`-kommentar | `X-Slack-Signature`/`X-Slack-Request-Timestamp` mot `SLACK_SIGNING_SECRET` |
 | `GET /coderabbit-quota` | Rullande 60-min-räkning av granskningstriggrande händelser | `Authorization: Bearer <QUERY_SECRET>` |
 | `GET /vps-status` | Senast kända status per källa | `Authorization: Bearer <QUERY_SECRET>` |
 
@@ -105,6 +126,7 @@ clients/
 6c. `wrangler secret put CF_ADMIN_TOKEN` — Cloudflare account-token med token-läs/skriv, för veckovisa token-underhållet
 6d. `wrangler secret put CF_READONLY_TOKEN` — Cloudflare readonly-token (Workers/D1/Access läs), för healthchecken
 6e. `wrangler secret put SLACK_BOT_TOKEN` (eller `SLACK_WEBHOOK_URL`) — valfritt men krävs för att Slack-notiserna ska nå fram
+6f. `wrangler secret put SLACK_SIGNING_SECRET` — Slack-appens Signing Secret (Basic Information-sidan), krävs för `/webhook/slack`. I Slack-appens Event Subscriptions, sätt Request URL till `https://ops-hub.denied.se/webhook/slack` och prenumerera på `message.channels`/`app_mention` för samma kanal som notiserna postas till. **OBS: endast Slack-användaren `U0BBTRUBHEK` är allowlistad för vidarebefordran till GitHub — en medveten säkerhetsspärr, se punkt 7 nedan.**
 7. Sätt `routes: [{ pattern: "ops-hub.<din-zon>", custom_domain: true }]` i `wrangler.jsonc` — **inte** `workers.dev`, den delade domänen blockeras av Cloudflares eget bot-skydd på kanten (bekräftat 2026-07-11, requesten når aldrig Workerns kod). `npm run deploy`.
 8. `blixten85` är ett **personkonto**, inte en Organization — GitHub stödjer inga konto-breda webhooks för personkonton. Skapa en webhook **per repo** istället (loop över `gh api repos/{owner}/{repo}/hooks -X POST ...`):
    - Payload URL: `https://ops-hub.<din-zon>/webhook/github`
