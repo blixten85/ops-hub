@@ -3,6 +3,7 @@
   "name": "ops-hub",
   "main": "src/index.ts",
   "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
   "vars": {
     // Hostnamnsdel av GitHub org-appen (informativt, inte hemligt)
     "GITHUB_ORG": "blixten85"
@@ -33,4 +34,5 @@
   //   SLACK_BOT_TOKEN       — (valfri) Slack bot-token för chat.postMessage; fallback: SLACK_WEBHOOK_URL
   //   SLACK_WEBHOOK_URL     — (valfri) Slack incoming webhook; saknas båda loggas notiser bara via console.warn
   //   SLACK_SIGNING_SECRET  — Slack-appens Signing Secret, verifierar POST /webhook/slack (Events API)
+  //   SENTRY_DSN            — allmän felspårning (ej AI Agent Monitoring), samma Sentry-projekt-mönster som product-describer-cloudflare
 }

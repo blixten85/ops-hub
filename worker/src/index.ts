@@ -1,3 +1,5 @@
+import * as Sentry from "@sentry/cloudflare";
+
 export interface Env {
   DB: D1Database;
   GITHUB_ORG: string;
@@ -10,6 +12,8 @@ export interface Env {
   SLACK_BOT_TOKEN?: string;
   SLACK_WEBHOOK_URL?: string;
   SLACK_SIGNING_SECRET: string;
+  // Sentry-felspårning (allmän, ej AI Agent Monitoring). Sätts som secret.
+  SENTRY_DSN?: string;
 }
 
 function isAuthorizedQuery(req: Request, env: Env): boolean {
@@ -792,55 +796,71 @@ async function dailyHealthSummary(env: Env): Promise<void> {
   }
 }
 
-export default {
-  async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const url = new URL(req.url);
+async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const url = new URL(req.url);
 
-    if (req.method === "POST" && url.pathname === "/webhook/github") {
-      return handleGitHubWebhook(req, env, ctx);
-    }
-    if (req.method === "POST" && url.pathname === "/webhook/heartbeat") {
-      return handleHeartbeat(req, env);
-    }
-    if (req.method === "POST" && url.pathname === "/webhook/slack") {
-      return handleSlackWebhook(req, env, ctx);
-    }
-    if (req.method === "GET" && url.pathname === "/coderabbit-quota") {
-      if (!isAuthorizedQuery(req, env)) return new Response("unauthorized", { status: 401 });
-      return handleCodeRabbitQuota(env);
-    }
-    if (req.method === "GET" && url.pathname === "/vps-status") {
-      if (!isAuthorizedQuery(req, env)) return new Response("unauthorized", { status: 401 });
-      return handleVpsStatus(env);
-    }
-    if (req.method === "GET" && url.pathname === "/") {
-      return Response.json({
-        service: "ops-hub",
-        endpoints: [
-          "POST /webhook/github",
-          "POST /webhook/heartbeat",
-          "POST /webhook/slack",
-          "GET /coderabbit-quota",
-          "GET /vps-status",
-        ],
-      });
-    }
-    return new Response("not found", { status: 404 });
-  },
+  if (req.method === "POST" && url.pathname === "/webhook/github") {
+    return handleGitHubWebhook(req, env, ctx);
+  }
+  if (req.method === "POST" && url.pathname === "/webhook/heartbeat") {
+    return handleHeartbeat(req, env);
+  }
+  if (req.method === "POST" && url.pathname === "/webhook/slack") {
+    return handleSlackWebhook(req, env, ctx);
+  }
+  if (req.method === "GET" && url.pathname === "/coderabbit-quota") {
+    if (!isAuthorizedQuery(req, env)) return new Response("unauthorized", { status: 401 });
+    return handleCodeRabbitQuota(env);
+  }
+  if (req.method === "GET" && url.pathname === "/vps-status") {
+    if (!isAuthorizedQuery(req, env)) return new Response("unauthorized", { status: 401 });
+    return handleVpsStatus(env);
+  }
+  if (req.method === "GET" && url.pathname === "/") {
+    return Response.json({
+      service: "ops-hub",
+      endpoints: [
+        "POST /webhook/github",
+        "POST /webhook/heartbeat",
+        "POST /webhook/slack",
+        "GET /coderabbit-quota",
+        "GET /vps-status",
+      ],
+    });
+  }
+  return new Response("not found", { status: 404 });
+}
 
-  async scheduled(event: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
-    switch (event.cron) {
-      case "*/5 * * * *": // healthcheck politiker.denied.se
-        await processHealthResults(env, await runHealthChecks(env));
-        break;
-      case "0 7 * * *": // daglig summering (läser inte state, dubbelprocessar inga transitioner)
-        await dailyHealthSummary(env);
-        break;
-      case "0 7 * * 1": // veckovis token-underhåll
-        await maintainCfTokens(env);
-        break;
-      default:
-        console.warn("scheduled: okänt cron-uttryck:", event.cron);
-    }
-  },
-} satisfies ExportedHandler<Env>;
+export default Sentry.withSentry(
+  (env: Env) => ({
+    dsn: env.SENTRY_DSN,
+    tracesSampleRate: 1.0,
+  }),
+  {
+    async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+      try {
+        return await route(req, env, ctx);
+      } catch (err) {
+        console.error(err);
+        Sentry.captureException(err);
+        return new Response("internal error", { status: 500 });
+      }
+    },
+
+    async scheduled(event: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
+      switch (event.cron) {
+        case "*/5 * * * *": // healthcheck politiker.denied.se
+          await processHealthResults(env, await runHealthChecks(env));
+          break;
+        case "0 7 * * *": // daglig summering (läser inte state, dubbelprocessar inga transitioner)
+          await dailyHealthSummary(env);
+          break;
+        case "0 7 * * 1": // veckovis token-underhåll
+          await maintainCfTokens(env);
+          break;
+        default:
+          console.warn("scheduled: okänt cron-uttryck:", event.cron);
+      }
+    },
+  } satisfies ExportedHandler<Env>,
+);
