@@ -194,6 +194,44 @@ async function armAutoMergeForEvent(env: Env, eventType: string, body: any): Pro
   }
 }
 
+// --- CodeRabbit olöst review-tråd → Slack-notis ---------------------------
+// GitHubs pull_request_review_thread-event har bara actions "resolved" och
+// "unresolved" (verifierat mot octokit/webhooks schema — INTE "created" som
+// ursprungligen antaget). En NY olöst tråd skickar "unresolved"; om den
+// löses upp igen och blir olöst på nytt skickas "unresolved" på nytt också,
+// men det är fortfarande rätt signal ("kräver ett mänskligt beslut just nu").
+// Författaren till trådens första kommentar avgör om det är CodeRabbit.
+
+const NOTIFIED_THREAD_DEBOUNCE_SECONDS = 30 * 60;
+
+async function notifyOnCodeRabbitUnresolvedThread(env: Env, body: any): Promise<void> {
+  try {
+    const repo = body?.repository?.full_name as string | undefined;
+    const prNumber = body?.pull_request?.number as number | undefined;
+    const prUrl = body?.pull_request?.html_url as string | undefined;
+    const author = (body?.thread?.comments?.[0]?.user?.login ?? "") as string;
+    if (!repo || !prNumber || !/^coderabbitai(\[bot\])?$/i.test(author)) return;
+
+    const windowStart = Math.floor(Date.now() / 1000) - NOTIFIED_THREAD_DEBOUNCE_SECONDS;
+    const existing = await env.DB.prepare(
+      `SELECT 1 FROM notified_threads WHERE repo = ? AND pr_number = ? AND notified_at >= ? LIMIT 1`
+    )
+      .bind(repo, prNumber, windowStart)
+      .first();
+    if (existing) return; // redan notifierad senaste 30 min — undvik Slack-spam vid flera trådar
+
+    await env.DB.prepare(
+      `INSERT INTO notified_threads (repo, pr_number, notified_at) VALUES (?, ?, unixepoch())`
+    )
+      .bind(repo, prNumber)
+      .run();
+
+    await postSlack(env, `🔍 CodeRabbit-fynd kräver beslut: ${repo}#${prNumber} — ${prUrl}`);
+  } catch (e) {
+    console.error(`pull_request_review_thread: notis misslyckades för ${body?.repository?.full_name}#${body?.pull_request?.number}:`, e);
+  }
+}
+
 async function handleGitHubWebhook(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const raw = await req.text();
   const sig = req.headers.get("x-hub-signature-256");
@@ -216,6 +254,10 @@ async function handleGitHubWebhook(req: Request, env: Env, ctx: ExecutionContext
     .run();
 
   ctx.waitUntil(armAutoMergeForEvent(env, eventType, body));
+
+  if (eventType === "pull_request_review_thread" && body?.action === "unresolved") {
+    ctx.waitUntil(notifyOnCodeRabbitUnresolvedThread(env, body));
+  }
 
   return new Response("ok", { status: 202 });
 }

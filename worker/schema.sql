@@ -22,6 +22,16 @@ CREATE TABLE IF NOT EXISTS healthcheck_state (
   detail TEXT                    -- senaste detaljbeskrivning
 );
 
+-- notified_threads: debounce för Slack-notiser om olösta CodeRabbit-
+-- review-trådar (pull_request_review_thread.unresolved) — max en notis
+-- per repo+PR var 30:e minut, oavsett hur många trådar som blir olösta.
+CREATE TABLE IF NOT EXISTS notified_threads (
+  repo TEXT NOT NULL,
+  pr_number INTEGER NOT NULL,
+  notified_at INTEGER NOT NULL   -- unix epoch seconds
+);
+CREATE INDEX IF NOT EXISTS idx_notified_threads_lookup ON notified_threads(repo, pr_number, notified_at);
+
 -- heartbeats: senast kända status per källa (VPS, tjänst, leverantör)
 CREATE TABLE IF NOT EXISTS heartbeats (
   source_id TEXT PRIMARY KEY,    -- t.ex. 'mp100', 'bastion-winvps', 'hostup-account'

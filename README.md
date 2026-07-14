@@ -52,6 +52,19 @@ leverantörer. Löser två saker som ett statiskt schema aldrig kan:
    måste förnyas manuellt av en människa. Kräver secreten
    `CF_ADMIN_TOKEN`.
 
+6. **Olösta CodeRabbit-review-trådar** — vid `pull_request_review_thread`
+   med `action: "unresolved"` (GitHubs event har bara actions `resolved`/
+   `unresolved` — INTE `created`, verifierat mot octokit/webhooks-schemat)
+   där trådens första kommentar är skriven av `coderabbitai`/`coderabbitai[bot]`
+   postas en kort Slack-notis med PR-länk. Detta täcker fallet där
+   rulesetets `required_review_thread_resolution` faktiskt blockerar merge
+   och ett mänskligt beslut krävs (åtgärda fyndet eller markera löst).
+   Debounce i D1 (`notified_threads`-tabellen): högst en notis per
+   repo+PR var 30:e minut, så flera olösta trådar på samma PR inte
+   spammar Slack. Kräver att webhooken per repo abonnerar på händelsen
+   "Pull request review threads" (utöver de i steg 8 nedan) samt
+   `SLACK_BOT_TOKEN`/`SLACK_WEBHOOK_URL`.
+
 Slack-notiser går via `SLACK_BOT_TOKEN` (chat.postMessage) med
 `SLACK_WEBHOOK_URL` som fallback; saknas båda loggas de bara i Workern
 (Slack-helpern kastar aldrig, övrig logik överlever alltid).
@@ -65,7 +78,7 @@ ovanpå — samma mönster andra kan följa för nya projekt.
 ```
 worker/
   src/index.ts    — hela Workern: webhook-mottagning + frågeendpoints + cron-handlers
-  schema.sql      — D1-schema (events + heartbeats + healthcheck_state)
+  schema.sql      — D1-schema (events + heartbeats + healthcheck_state + notified_threads)
   wrangler.jsonc  — Cloudflare-konfig
 clients/
   heartbeat.sh    — exempel-klient att köra via cron på en VPS
@@ -97,7 +110,8 @@ clients/
    - Payload URL: `https://ops-hub.<din-zon>/webhook/github`
    - Content type: `application/json`
    - Secret: samma som steg 4
-   - Events: minst `Pull requests`, `Issue comments`, `Check runs`
+   - Events: minst `Pull requests`, `Issue comments`, `Check runs`,
+     `Pull request review threads` (för olösta CodeRabbit-fynd-notiser)
 9. På varje VPS (t.ex. mp100), lägg till en cron-rad:
    ```
    */5 * * * * HEARTBEAT_SECRET=$(cat /path/to/secret) OPS_HUB_URL=https://ops-hub.<din-zon> /path/to/clients/heartbeat.sh mp100
