@@ -28,9 +28,9 @@ CREATE TABLE IF NOT EXISTS healthcheck_state (
 CREATE TABLE IF NOT EXISTS notified_threads (
   repo TEXT NOT NULL,
   pr_number INTEGER NOT NULL,
-  notified_at INTEGER NOT NULL   -- unix epoch seconds
+  notified_at INTEGER NOT NULL,  -- unix epoch seconds
+  UNIQUE(repo, pr_number)
 );
-CREATE INDEX IF NOT EXISTS idx_notified_threads_lookup ON notified_threads(repo, pr_number, notified_at);
 
 -- heartbeats: senast kända status per källa (VPS, tjänst, leverantör)
 CREATE TABLE IF NOT EXISTS heartbeats (

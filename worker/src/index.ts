@@ -212,19 +212,18 @@ async function notifyOnCodeRabbitUnresolvedThread(env: Env, body: any): Promise<
     const author = (body?.thread?.comments?.[0]?.user?.login ?? "") as string;
     if (!repo || !prNumber || !/^coderabbitai(\[bot\])?$/i.test(author)) return;
 
-    const windowStart = Math.floor(Date.now() / 1000) - NOTIFIED_THREAD_DEBOUNCE_SECONDS;
-    const existing = await env.DB.prepare(
-      `SELECT 1 FROM notified_threads WHERE repo = ? AND pr_number = ? AND notified_at >= ? LIMIT 1`
+    // Atomär check-and-set: UPSERT som bara uppdaterar (och alltså "vinner")
+    // om debounce-fönstret gått ut. Två samtidiga webhook-leveranser för
+    // samma PR kan inte längre båda passera — SQLite serialiserar konflikten
+    // och bara en av dem får changes=1.
+    const result = await env.DB.prepare(
+      `INSERT INTO notified_threads (repo, pr_number, notified_at) VALUES (?, ?, unixepoch())
+       ON CONFLICT(repo, pr_number) DO UPDATE SET notified_at = excluded.notified_at
+       WHERE excluded.notified_at - notified_threads.notified_at >= ?`
     )
-      .bind(repo, prNumber, windowStart)
-      .first();
-    if (existing) return; // redan notifierad senaste 30 min — undvik Slack-spam vid flera trådar
-
-    await env.DB.prepare(
-      `INSERT INTO notified_threads (repo, pr_number, notified_at) VALUES (?, ?, unixepoch())`
-    )
-      .bind(repo, prNumber)
+      .bind(repo, prNumber, NOTIFIED_THREAD_DEBOUNCE_SECONDS)
       .run();
+    if (!result.meta.changes) return; // redan notifierad senaste 30 min — undvik Slack-spam vid flera trådar
 
     await postSlack(env, `🔍 CodeRabbit-fynd kräver beslut: ${repo}#${prNumber} — ${prUrl}`);
   } catch (e) {
