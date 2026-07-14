@@ -38,6 +38,16 @@ CREATE TABLE IF NOT EXISTS notified_threads (
 -- SQLite) — kör bara en gång mot en databas som saknar kolumnen.
 ALTER TABLE notified_threads ADD COLUMN slack_thread_ts TEXT;
 
+-- slack_event_ids: dedup för Slacks Events API. Slack retry:ar leveranser vid
+-- timeout/fel (t.ex. om Workern svarar sent) — utan denna tabell kan samma
+-- event_id forwardas till GitHub flera gånger och skapa dubbla @claude-
+-- kommentarer. PRIMARY KEY(event_id) gör INSERT ... ON CONFLICT DO NOTHING
+-- till en atomär "har vi sett denna redan?"-koll.
+CREATE TABLE IF NOT EXISTS slack_event_ids (
+  event_id TEXT PRIMARY KEY,
+  received_at INTEGER NOT NULL   -- unix epoch seconds
+);
+
 -- heartbeats: senast kända status per källa (VPS, tjänst, leverantör)
 CREATE TABLE IF NOT EXISTS heartbeats (
   source_id TEXT PRIMARY KEY,    -- t.ex. 'mp100', 'bastion-winvps', 'hostup-account'

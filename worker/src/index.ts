@@ -9,7 +9,7 @@ export interface Env {
   CF_READONLY_TOKEN: string;
   SLACK_BOT_TOKEN?: string;
   SLACK_WEBHOOK_URL?: string;
-  SLACK_SIGNING_SECRET?: string;
+  SLACK_SIGNING_SECRET: string;
 }
 
 function isAuthorizedQuery(req: Request, env: Env): boolean {
@@ -211,7 +211,7 @@ async function notifyOnCodeRabbitUnresolvedThread(env: Env, body: any): Promise<
     const prNumber = body?.pull_request?.number as number | undefined;
     const prUrl = body?.pull_request?.html_url as string | undefined;
     const author = (body?.thread?.comments?.[0]?.user?.login ?? "") as string;
-    if (!repo || !prNumber || !/^coderabbitai(\[bot\])?$/i.test(author)) return;
+    if (!repo || !prNumber || !prUrl || !/^coderabbitai(\[bot\])?$/i.test(author)) return;
 
     // Atomär check-and-set: UPSERT som bara uppdaterar (och alltså "vinner")
     // om debounce-fönstret gått ut. Två samtidiga webhook-leveranser för
@@ -226,7 +226,7 @@ async function notifyOnCodeRabbitUnresolvedThread(env: Env, body: any): Promise<
       .run();
     if (!result.meta.changes) return; // redan notifierad senaste 30 min — undvik Slack-spam vid flera trådar
 
-    const ts = await postSlack(env, `🔍 CodeRabbit-fynd kräver beslut: ${repo}#${prNumber} — ${prUrl}`);
+    const { ts } = await postSlack(env, `🔍 CodeRabbit-fynd kräver beslut: ${repo}#${prNumber} — ${prUrl}`);
     if (ts) {
       await env.DB.prepare(
         `UPDATE notified_threads SET slack_thread_ts = ? WHERE repo = ? AND pr_number = ?`
@@ -330,11 +330,14 @@ async function handleVpsStatus(env: Env): Promise<Response> {
 
 const SLACK_CHANNEL = "C0BD5U2RWD6";
 
-// Returnerar postat meddelandes `ts` (Slack chat.postMessage-svar) om
-// SLACK_BOT_TOKEN är konfigurerat — används för att koppla trådsvar tillbaka
-// till rätt repo+PR. Incoming Webhook (SLACK_WEBHOOK_URL) ger ingen `ts`
-// tillbaka — trådkoppling hoppas då bara över, kraschar aldrig.
-async function postSlack(env: Env, text: string): Promise<string | null> {
+// Returnerar { ok, ts }. `ts` är postat meddelandes Slack-ts (chat.postMessage-
+// svar) om SLACK_BOT_TOKEN är konfigurerat — används för att koppla trådsvar
+// tillbaka till rätt repo+PR. `ok` speglar FAKTISK leverans (HTTP-status +
+// Slacks eget `ok`-fält) — kollas separat från `ts`, eftersom en lyckad ren
+// webhook-leverans (SLACK_WEBHOOK_URL) saknar `ts` men är ändå `ok: true`.
+// Detta undviker att en misslyckad leverans tolkas som lyckad bara för att
+// den råkar sakna ts (tidigare bugg: null betydde både "fel" och "lyckad utan ts").
+async function postSlack(env: Env, text: string): Promise<{ ok: boolean; ts: string | null }> {
   try {
     if (env.SLACK_BOT_TOKEN) {
       const res = await fetch("https://slack.com/api/chat.postMessage", {
@@ -346,26 +349,30 @@ async function postSlack(env: Env, text: string): Promise<string | null> {
         body: JSON.stringify({ channel: SLACK_CHANNEL, text }),
       });
       const json = (await res.json()) as { ok?: boolean; error?: string; ts?: string };
-      if (!json.ok) {
-        console.warn("slack: chat.postMessage misslyckades:", json.error);
-        return null;
+      if (!res.ok || !json.ok) {
+        console.warn(`slack: chat.postMessage misslyckades (HTTP ${res.status}):`, json.error);
+        return { ok: false, ts: null };
       }
-      return json.ts ?? null;
+      return { ok: true, ts: json.ts ?? null };
     }
     if (env.SLACK_WEBHOOK_URL) {
-      await fetch(env.SLACK_WEBHOOK_URL, {
+      const res = await fetch(env.SLACK_WEBHOOK_URL, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ text }),
       });
+      if (!res.ok) {
+        console.warn(`slack: incoming webhook misslyckades (HTTP ${res.status}):`, await res.text());
+        return { ok: false, ts: null };
+      }
       console.warn("slack: SLACK_WEBHOOK_URL ger ingen ts — trådkoppling (Slack-svar → PR) hoppas över för detta meddelande");
-      return null;
+      return { ok: true, ts: null };
     }
     console.warn("slack: varken SLACK_BOT_TOKEN eller SLACK_WEBHOOK_URL satt — meddelande ej skickat:", text);
-    return null;
+    return { ok: false, ts: null };
   } catch (e) {
     console.warn("slack: post misslyckades:", e);
-    return null;
+    return { ok: false, ts: null };
   }
 }
 
@@ -462,22 +469,47 @@ async function handleSlackEventCallback(env: Env, ctx: ExecutionContext, event: 
 }
 
 async function handleSlackWebhook(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  // CWE-287-fix: utan denna guard skulle en saknad secret falla tillbaka på
+  // en tom sträng som HMAC-nyckel (env.SLACK_SIGNING_SECRET ?? "") — vilket
+  // gör signaturverifieringen trivialt förfalskbar (vem som helst kan räkna
+  // ut HMAC med nyckeln ""). Måste köras INNAN signaturverifiering.
+  if (!env.SLACK_SIGNING_SECRET) {
+    console.error("slack: SLACK_SIGNING_SECRET saknas — avvisar webhook (kan inte verifiera signatur säkert)");
+    return new Response("service unavailable", { status: 503 });
+  }
+
   const raw = await req.text();
   const ok = await verifySlackSignature(
     raw,
     req.headers.get("x-slack-request-timestamp"),
     req.headers.get("x-slack-signature"),
-    env.SLACK_SIGNING_SECRET ?? ""
+    env.SLACK_SIGNING_SECRET
   );
   if (!ok) return new Response("invalid signature", { status: 401 });
 
-  const body = JSON.parse(raw) as { type?: string; challenge?: string; event?: any };
+  const body = JSON.parse(raw) as { type?: string; challenge?: string; event?: any; event_id?: string };
 
   if (body.type === "url_verification") {
     return Response.json({ challenge: body.challenge });
   }
 
   if (body.type === "event_callback" && body.event) {
+    // Dedup: Slack retry:ar leveranser vid timeout/fel på vårt svar. Utan
+    // denna koll kan samma event_id forwardas flera gånger → dubbla
+    // @claude-kommentarer på GitHub. INSERT vinner bara första gången per
+    // event_id (PRIMARY KEY-konflikt slår igenom vid dubblett).
+    if (body.event_id) {
+      const inserted = await env.DB.prepare(
+        `INSERT INTO slack_event_ids (event_id, received_at) VALUES (?, unixepoch())
+         ON CONFLICT(event_id) DO NOTHING`
+      )
+        .bind(body.event_id)
+        .run();
+      if (!inserted.meta.changes) {
+        console.warn("slack: dubblett event_id, hoppar över forwarding", body.event_id);
+        return new Response("ok", { status: 200 });
+      }
+    }
     ctx.waitUntil(handleSlackEventCallback(env, ctx, body.event));
   }
 
