@@ -1,0 +1,23 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/worker"
+    schedule:
+      interval: "weekly"
+      day: "thursday"
+      time: "03:00"
+      timezone: "Europe/Stockholm"
+    groups:
+      npm-patch-minor:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "thursday"
+      time: "04:00"
+      timezone: "Europe/Stockholm"
+    groups:
+      actions-patch-minor:
+        update-types: ["minor", "patch"]
