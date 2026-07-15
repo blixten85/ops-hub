@@ -454,7 +454,7 @@ async function verifySlackSignature(
 
 async function forwardSlackReplyToGitHub(env: Env, repo: string, prNumber: number, text: string): Promise<void> {
   try {
-    const res = await fetch(`https://api.github.com/repos/${repo}/issues/${prNumber}/comments`, {
+    const res = await fetchWithTimeout(`https://api.github.com/repos/${repo}/issues/${prNumber}/comments`, {
       method: "POST",
       headers: {
         authorization: `Bearer ${env.GITHUB_TOKEN}`,
