@@ -175,9 +175,12 @@ async function maybeArmAutoMerge(env: Env, repoFullName: string, prNumber: numbe
     // ("Pull request is in clean status"). Utan fallback fastnar en sådan
     // PR för alltid — sista check_run-eventet har redan kommit. Paritet
     // med gamla molnrutinens `gh pr merge --auto`: mergea direkt, ENDAST
-    // vid exakt detta fel och bekräftat CLEAN. Alla andra fel bubblar upp
-    // till logga-och-skippa.
-    if (!(/clean status/i.test(String(e)) && pr.mergeStateStatus === "CLEAN")) throw e;
+    // vid exakt detta fel. Kollar INTE `pr.mergeStateStatus` här (den är en
+    // stale ögonblicksbild från frågan högre upp) — själva felmeddelandet
+    // FRÅN GitHub är redan den färska, auktoritativa bekräftelsen på att
+    // PR:en är CLEAN just nu (annars hade GitHub inte gett just detta fel).
+    // Alla andra fel bubblar upp till logga-och-skippa.
+    if (!/clean status/i.test(String(e))) throw e;
     await githubGraphQL(
       env,
       `mutation($id: ID!) {
