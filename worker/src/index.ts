@@ -99,9 +99,9 @@ ${commentBody.slice(0, 3000)}`;
     const text = result?.response ?? "";
     const match = text.match(/\{[\s\S]*\}/);
     if (!match) return { action: "escalate", reasoning: "AI-svar gick inte att tolka som JSON" };
-    const parsed = JSON.parse(match[0]) as { action?: string; reasoning?: string };
+    const parsed = JSON.parse(match[0]) as { action?: string; reasoning?: unknown };
     if (parsed.action === "skip" || parsed.action === "autofix" || parsed.action === "escalate") {
-      return { action: parsed.action, reasoning: parsed.reasoning ?? "" };
+      return { action: parsed.action, reasoning: typeof parsed.reasoning === "string" ? parsed.reasoning : "" };
     }
     return { action: "escalate", reasoning: `okänt action-värde: ${parsed.action}` };
   } catch (e) {
@@ -110,7 +110,15 @@ ${commentBody.slice(0, 3000)}`;
   }
 }
 
-async function postClaudeEscalationComment(env: Env, repo: string, prNumber: number, reasoning: string): Promise<boolean> {
+// Meddelandet är MEDVETET statiskt — varken den olösta trådens råa text
+// (commentBody) eller Workers AI:s reasoning-fält interpolreras hit.
+// commentBody kommer från en extern, opålitlig källa (allt en PR-författare
+// kan skriva in i sin kod triggar CodeRabbit-kommentarer), och reasoning är
+// ett AI-genererat svar byggt på den texten — att klistra in någotdera i en
+// autonom @claude-prompt öppnar för prompt injection (CWE-1427, flaggat av
+// CodeRabbit). Claude GitHub App:en läser redan själv PR:ens olösta trådar
+// när den blir taggad, så den behöver inte få texten återberättad här.
+async function postClaudeEscalationComment(env: Env, repo: string, prNumber: number): Promise<boolean> {
   const res = await fetch(`https://api.github.com/repos/${repo}/issues/${prNumber}/comments`, {
     method: "POST",
     headers: {
@@ -119,7 +127,7 @@ async function postClaudeEscalationComment(env: Env, repo: string, prNumber: num
       "User-Agent": "ops-hub",
     },
     body: JSON.stringify({
-      body: `@claude Ett CodeRabbit-fynd på denna PR har klassificerats som att det kräver ett mänskligt/arkitekturbeslut: ${reasoning}\n\nUndersök tråden och föreslå en lösning, eller förklara varför den kan avfärdas.`,
+      body: `@claude Ett CodeRabbit-fynd på denna PR har klassificerats som att det kräver ett mänskligt/arkitekturbeslut. Undersök de olösta review-trådarna och föreslå en lösning, eller förklara varför de kan avfärdas.`,
     }),
   });
   if (!res.ok) {
@@ -148,29 +156,20 @@ async function handleUnresolvedThread(env: Env, body: any): Promise<void> {
 
     if (action !== "escalate") return; // "skip" och "autofix" hanteras redan av coderabbit-queue/ingenting
 
-    const existing = await env.DB.prepare(
-      `SELECT escalation_count FROM escalated_threads WHERE repo = ? AND pr_number = ?`
-    )
-      .bind(repo, prNumber)
-      .first<{ escalation_count: number }>();
-    if ((existing?.escalation_count ?? 0) >= MAX_ESCALATIONS_PER_PR) {
-      console.error(`pull_request_review_thread: ${repo}#${prNumber} har redan eskalerats ${MAX_ESCALATIONS_PER_PR} ggr utan att lösas — ger upp, kräver manuell granskning`);
-      return;
-    }
-
-    // Atomär check-and-set: samma debounce-mönster som resten av ops-hub —
-    // bara en eskalering per repo+PR var 30:e minut, oavsett hur många
-    // trådar som blir olösta under den tiden.
+    // Atomär check-and-set: debounce OCH max-räknare kollas och uppdateras i
+    // SAMMA SQL-sats, så två samtidiga webhook-leveranser för samma PR inte
+    // båda kan passera check-en innan någon hunnit inkrementera (TOCTOU-
+    // race om detta gjordes som en separat SELECT följt av en UPDATE).
     const result = await env.DB.prepare(
       `INSERT INTO escalated_threads (repo, pr_number, escalated_at, escalation_count) VALUES (?, ?, unixepoch(), 1)
        ON CONFLICT(repo, pr_number) DO UPDATE SET escalated_at = excluded.escalated_at, escalation_count = escalated_threads.escalation_count + 1
-       WHERE excluded.escalated_at - escalated_threads.escalated_at >= ?`
+       WHERE excluded.escalated_at - escalated_threads.escalated_at >= ? AND escalated_threads.escalation_count < ?`
     )
-      .bind(repo, prNumber, ESCALATION_DEBOUNCE_SECONDS)
+      .bind(repo, prNumber, ESCALATION_DEBOUNCE_SECONDS, MAX_ESCALATIONS_PER_PR)
       .run();
-    if (!result.meta.changes) return; // redan eskalerad senaste 30 min
+    if (!result.meta.changes) return; // redan eskalerad senaste 30 min, eller max antal eskaleringar nått
 
-    const ok = await postClaudeEscalationComment(env, repo, prNumber, reasoning);
+    const ok = await postClaudeEscalationComment(env, repo, prNumber);
     if (!ok) {
       // Rulla tillbaka debounce-reservationen (men behåll räknaren orörd —
       // detta försök räknas inte om kommentaren aldrig postades) så nästa
