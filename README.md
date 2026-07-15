@@ -12,8 +12,34 @@ leverantörer. Löser två saker som ett statiskt schema aldrig kan:
    kanske inte ens behövs den dagen (lite/inga dependency-uppdateringar).
 2. **VPS/tjänst-status** — `POST /webhook/heartbeat` tar emot pingar från
    mp100 och andra servrar (cron, delad hemlighet). `GET /vps-status`
-   visar senast sedd status per källa — grund för att senare koppla in
-   riktiga ner/upp-notiser (t.ex. till Slack via Resend/webhook).
+   visar senast sedd status per källa.
+3. **AI-triage av olösta CodeRabbit-trådar** — vid `pull_request_review_thread`
+   med `action: "unresolved"` från CodeRabbit klassificerar Workers AI fyndet
+   som `skip` (trivialt), `autofix` (redan täckt av coderabbit-queues
+   autofix-loop) eller `escalate` (kräver mänskligt/arkitekturbeslut). Bara
+   `escalate` gör något synligt: en `@claude`-kommentar postas på PR:en, som
+   den redan installerade Claude GitHub App:en plockar upp autonomt — samma
+   mönster som `ask-claude`-labeln, ingen Slack-integration behövs. Max
+   `MAX_ESCALATIONS_PER_PR` (3) eskaleringar per PR innan den lämnas för
+   manuell granskning, för att undvika en långsam eskaleringsloop om fixen
+   inte biter.
+4. **Auto-merge-armering** — vid `pull_request`/`check_run`-events armar
+   GitHubs nativa auto-merge (squash) på PR:er som är redo (CLEAN eller
+   MERGEABLE + gröna checks). Ersätter en tidigare timer-baserad molnrutin
+   (`gh pr merge --auto`).
+5. **Hälsokontroller politiker.denied.se** (cron `*/5 * * * *`) — sex
+   kontroller (root-HTTP, API-JSON, domain-routing, Worker-scripts, D1-
+   politikerantal, Access-appar). Slackar bara vid OK↔FAIL-transition +
+   påminnelse var 6:e timme vid kvarstående FAIL. `0 7 * * *` kör en daglig
+   summering oavsett transition.
+6. **CF-token-underhåll** (cron `0 7 * * 1`, veckovis) — förnyer Cloudflare
+   account-tokens som går ut inom 30 dagar, varnar i Slack om en
+   fine-grained GitHub PAT (politiker-webapp) närmar sig sitt utgångsdatum
+   (kan bara förnyas manuellt).
+
+Funktion 5 och 6 postar till Slack (`postSlack`, utgående only — ingen
+inkommande Slack-relä finns eller behövs). Funktion 3:s eskalering går via
+`@claude`-kommentarer på GitHub istället, inte Slack.
 
 ## Arkitektur
 
@@ -23,8 +49,8 @@ ovanpå — samma mönster andra kan följa för nya projekt.
 
 ```
 worker/
-  src/index.ts    — hela Workern: webhook-mottagning + frågeendpoints
-  schema.sql      — D1-schema (events + heartbeats)
+  src/index.ts    — hela Workern: webhook-mottagning, cron-jobb, frågeendpoints
+  schema.sql      — D1-schema (events, heartbeats, healthcheck_state, thread_classifications, escalated_threads)
   wrangler.jsonc  — Cloudflare-konfig
 clients/
   heartbeat.sh    — exempel-klient att köra via cron på en VPS
@@ -39,6 +65,10 @@ clients/
 | `GET /coderabbit-quota` | Rullande 60-min-räkning av granskningstriggrande händelser | `Authorization: Bearer <QUERY_SECRET>` |
 | `GET /vps-status` | Senast kända status per källa | `Authorization: Bearer <QUERY_SECRET>` |
 
+`POST /webhook/github` med `pull_request_review_thread.unresolved` triggar
+dessutom AI-triage (se ovan) — ingen egen endpoint, bara en gren i samma
+handler.
+
 ## Setup
 
 1. `cd worker && npm install`
@@ -47,12 +77,16 @@ clients/
 4. `wrangler secret put GITHUB_WEBHOOK_SECRET` — valfri sträng, samma används i steg 7
 5. `wrangler secret put HEARTBEAT_SECRET` — valfri sträng, delas till VPS:arna
 6. `wrangler secret put QUERY_SECRET` — valfri sträng, delas till allt som ska läsa `/coderabbit-quota` eller `/vps-status`
+6b. `wrangler secret put GITHUB_TOKEN` — fine-grained PAT med `issues:write` och `pull-requests:write`, scopad till ENDAST de repon som hanteras av automationen (inte hela kontot), används för auto-merge-armering och `@claude`-eskaleringskommentarer
+6c. `wrangler secret put CF_ADMIN_TOKEN` — Cloudflare account-token som får hantera andra account-tokens (för veckovis förnyelse)
+6d. `wrangler secret put CF_READONLY_TOKEN` — Cloudflare account-token med läsrättigheter (Workers, D1, Access) för hälsokontrollerna
+6e. `wrangler secret put SLACK_WEBHOOK_URL` (eller `SLACK_BOT_TOKEN`) — valfritt, för utgående alerts från hälsokontroller/token-underhåll. Utan någon av dem loggas alerts bara internt (`postSlack` kastar aldrig, best effort).
 7. Sätt `routes: [{ pattern: "ops-hub.<din-zon>", custom_domain: true }]` i `wrangler.jsonc` — **inte** `workers.dev`, den delade domänen blockeras av Cloudflares eget bot-skydd på kanten (bekräftat 2026-07-11, requesten når aldrig Workerns kod). `npm run deploy`.
 8. `blixten85` är ett **personkonto**, inte en Organization — GitHub stödjer inga konto-breda webhooks för personkonton. Skapa en webhook **per repo** istället (loop över `gh api repos/{owner}/{repo}/hooks -X POST ...`):
    - Payload URL: `https://ops-hub.<din-zon>/webhook/github`
    - Content type: `application/json`
    - Secret: samma som steg 4
-   - Events: minst `Pull requests`, `Issue comments`, `Check runs`
+   - Events: minst `Pull requests`, `Issue comments`, `Check runs`, `Pull request review threads` (krävs för AI-triage-funktionen — utan den når `pull_request_review_thread.unresolved` aldrig `/webhook/github`)
 9. På varje VPS (t.ex. mp100), lägg till en cron-rad:
    ```
    */5 * * * * HEARTBEAT_SECRET=$(cat /path/to/secret) OPS_HUB_URL=https://ops-hub.<din-zon> /path/to/clients/heartbeat.sh mp100
