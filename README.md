@@ -86,7 +86,7 @@ handler.
    - Payload URL: `https://ops-hub.<din-zon>/webhook/github`
    - Content type: `application/json`
    - Secret: samma som steg 4
-   - Events: minst `Pull requests`, `Issue comments`, `Check runs`
+   - Events: minst `Pull requests`, `Issue comments`, `Check runs`, `Pull request review threads` (krävs för AI-triage-funktionen — utan den når `pull_request_review_thread.unresolved` aldrig `/webhook/github`)
 9. På varje VPS (t.ex. mp100), lägg till en cron-rad:
    ```
    */5 * * * * HEARTBEAT_SECRET=$(cat /path/to/secret) OPS_HUB_URL=https://ops-hub.<din-zon> /path/to/clients/heartbeat.sh mp100
