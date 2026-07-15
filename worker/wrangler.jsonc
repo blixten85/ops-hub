@@ -19,6 +19,9 @@
       "database_id": "5942ecca-cac7-4658-a8a5-5a60733da6c8"
     }
   ],
+  "ai": {
+    "binding": "AI"
+  },
   "routes": [
     { "pattern": "ops-hub.denied.se", "custom_domain": true }
   ]
@@ -26,4 +29,5 @@
   //   GITHUB_WEBHOOK_SECRET — delad hemlighet satt när org-webhooken skapas
   //   HEARTBEAT_SECRET      — delad hemlighet för /webhook/heartbeat (mp100, VPS:ar postar med denna)
   //   SENTRY_DSN            — allmän felspårning (ej AI Agent Monitoring), samma Sentry-projekt-mönster som product-describer-cloudflare
+  //   GITHUB_TOKEN          — fine-grained PAT, issues:write på alla repon, för @claude-eskaleringskommentarer
 }

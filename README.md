@@ -14,6 +14,16 @@ leverantörer. Löser två saker som ett statiskt schema aldrig kan:
    mp100 och andra servrar (cron, delad hemlighet). `GET /vps-status`
    visar senast sedd status per källa — grund för att senare koppla in
    riktiga ner/upp-notiser (t.ex. till Slack via Resend/webhook).
+3. **AI-triage av olösta CodeRabbit-trådar** — vid `pull_request_review_thread`
+   med `action: "unresolved"` från CodeRabbit klassificerar Workers AI fyndet
+   som `skip` (trivialt), `autofix` (redan täckt av coderabbit-queues
+   autofix-loop) eller `escalate` (kräver mänskligt/arkitekturbeslut). Bara
+   `escalate` gör något synligt: en `@claude`-kommentar postas på PR:en, som
+   den redan installerade Claude GitHub App:en plockar upp autonomt — samma
+   mönster som `ask-claude`-labeln, ingen Slack-integration behövs. Max
+   `MAX_ESCALATIONS_PER_PR` (3) eskaleringar per PR innan den lämnas för
+   manuell granskning, för att undvika en långsam eskaleringsloop om fixen
+   inte biter.
 
 ## Arkitektur
 
@@ -39,6 +49,10 @@ clients/
 | `GET /coderabbit-quota` | Rullande 60-min-räkning av granskningstriggrande händelser | `Authorization: Bearer <QUERY_SECRET>` |
 | `GET /vps-status` | Senast kända status per källa | `Authorization: Bearer <QUERY_SECRET>` |
 
+`POST /webhook/github` med `pull_request_review_thread.unresolved` triggar
+dessutom AI-triage (se ovan) — ingen egen endpoint, bara en gren i samma
+handler.
+
 ## Setup
 
 1. `cd worker && npm install`
@@ -47,6 +61,7 @@ clients/
 4. `wrangler secret put GITHUB_WEBHOOK_SECRET` — valfri sträng, samma används i steg 7
 5. `wrangler secret put HEARTBEAT_SECRET` — valfri sträng, delas till VPS:arna
 6. `wrangler secret put QUERY_SECRET` — valfri sträng, delas till allt som ska läsa `/coderabbit-quota` eller `/vps-status`
+6b. `wrangler secret put GITHUB_TOKEN` — fine-grained PAT med `issues:write` på alla repon, används bara för att posta `@claude`-eskaleringskommentarer
 7. Sätt `routes: [{ pattern: "ops-hub.<din-zon>", custom_domain: true }]` i `wrangler.jsonc` — **inte** `workers.dev`, den delade domänen blockeras av Cloudflares eget bot-skydd på kanten (bekräftat 2026-07-11, requesten når aldrig Workerns kod). `npm run deploy`.
 8. `blixten85` är ett **personkonto**, inte en Organization — GitHub stödjer inga konto-breda webhooks för personkonton. Skapa en webhook **per repo** istället (loop över `gh api repos/{owner}/{repo}/hooks -X POST ...`):
    - Payload URL: `https://ops-hub.<din-zon>/webhook/github`

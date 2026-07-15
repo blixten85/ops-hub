@@ -2,10 +2,14 @@ import * as Sentry from "@sentry/cloudflare";
 
 export interface Env {
   DB: D1Database;
+  AI: Ai;
   GITHUB_ORG: string;
   GITHUB_WEBHOOK_SECRET: string;
   HEARTBEAT_SECRET: string;
   QUERY_SECRET: string;
+  // PAT med issues:write på alla repon — bara för att posta @claude-
+  // eskaleringskommentarer, samma mekanism som claude-assign-trigger.yml.
+  GITHUB_TOKEN: string;
   // Sentry-felspårning (allmän, ej AI Agent Monitoring). Sätts som secret.
   SENTRY_DSN?: string;
 }
@@ -56,7 +60,134 @@ function triggersCodeRabbit(eventType: string, body: any): boolean {
   return false;
 }
 
-async function handleGitHubWebhook(req: Request, env: Env): Promise<Response> {
+// GitHubs pull_request_review_thread-event har bara actions "resolved" och
+// "unresolved". En NY olöst tråd skickar "unresolved"; om den löses upp igen
+// och blir olöst på nytt skickas "unresolved" igen också, men det är
+// fortfarande rätt signal ("den här tråden kräver ett beslut just nu").
+// Författaren till trådens första kommentar avgör om det är CodeRabbit.
+
+const ESCALATION_DEBOUNCE_SECONDS = 30 * 60;
+// Efter så här många @claude-eskaleringar på samma PR (utan att tråden slutar
+// bli olöst) ger vi upp och lämnar den för manuell granskning istället för
+// att fortsätta posta kommentarer — samma säkerhetsgräns som
+// coderabbit-queues MAX_AUTOFIX_ATTEMPTS, och av samma anledning (undvik en
+// långsam variant av 1500kr/6h-loop-incidenten i politiker-webapp).
+const MAX_ESCALATIONS_PER_PR = 3;
+
+type ThreadAction = "skip" | "autofix" | "escalate";
+
+// Klassificerar en olöst CodeRabbit-tråd med Workers AI så att bara genuint
+// tvetydiga/arkitekturfynd eskaleras — resten är antingen redan täckta av
+// coderabbit-queues autofix-loop eller för triviala för att vara värda ett
+// avbrott. Fail-safe: allt som inte går att tolka som ett rent skip/autofix-
+// svar eskaleras hellre än att tystas ner.
+async function classifyThread(env: Env, commentBody: string): Promise<{ action: ThreadAction; reasoning: string }> {
+  const prompt = `Du klassificerar ett CodeRabbit-granskningsfynd på en GitHub-PR. Svara ENDAST med ett JSON-objekt: {"action": "skip"|"autofix"|"escalate", "reasoning": "kort motivering på svenska"}.
+
+- "skip": trivialt/stilfynd utan verklig risk (t.ex. dependency-pinning-stil, kommentarsformat).
+- "autofix": ett konkret, mekaniskt fixbart fynd (t.ex. saknad felhantering, fel strängjämförelse, saknad null-check) som en AI-kodagent kan lösa utan att behöva ett produktbeslut.
+- "escalate": kräver ett mänskligt/arkitekturbeslut (säkerhetsavvägning, breaking change, affärslogik, något genuint tvetydigt).
+
+Fyndet:
+${commentBody.slice(0, 3000)}`;
+
+  try {
+    const result = (await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 200,
+    })) as { response?: string };
+    const text = result?.response ?? "";
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return { action: "escalate", reasoning: "AI-svar gick inte att tolka som JSON" };
+    const parsed = JSON.parse(match[0]) as { action?: string; reasoning?: string };
+    if (parsed.action === "skip" || parsed.action === "autofix" || parsed.action === "escalate") {
+      return { action: parsed.action, reasoning: parsed.reasoning ?? "" };
+    }
+    return { action: "escalate", reasoning: `okänt action-värde: ${parsed.action}` };
+  } catch (e) {
+    console.error("classifyThread: Workers AI-anrop misslyckades:", e);
+    return { action: "escalate", reasoning: "Workers AI-anrop misslyckades" };
+  }
+}
+
+async function postClaudeEscalationComment(env: Env, repo: string, prNumber: number, reasoning: string): Promise<boolean> {
+  const res = await fetch(`https://api.github.com/repos/${repo}/issues/${prNumber}/comments`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+      Accept: "application/vnd.github+json",
+      "User-Agent": "ops-hub",
+    },
+    body: JSON.stringify({
+      body: `@claude Ett CodeRabbit-fynd på denna PR har klassificerats som att det kräver ett mänskligt/arkitekturbeslut: ${reasoning}\n\nUndersök tråden och föreslå en lösning, eller förklara varför den kan avfärdas.`,
+    }),
+  });
+  if (!res.ok) {
+    console.error(`postClaudeEscalationComment: GitHub API svarade ${res.status} för ${repo}#${prNumber}`);
+    return false;
+  }
+  return true;
+}
+
+async function handleUnresolvedThread(env: Env, body: any): Promise<void> {
+  try {
+    const repo = body?.repository?.full_name as string | undefined;
+    const prNumber = body?.pull_request?.number as number | undefined;
+    const author = (body?.thread?.comments?.[0]?.user?.login ?? "") as string;
+    const commentBody = (body?.thread?.comments?.[0]?.body ?? "") as string;
+    if (!repo || !prNumber || !/^coderabbitai(\[bot\])?$/i.test(author) || !commentBody) return;
+
+    const { action, reasoning } = await classifyThread(env, commentBody);
+
+    await env.DB.prepare(
+      `INSERT INTO thread_classifications (repo, pr_number, action, reasoning, classified_at)
+       VALUES (?, ?, ?, ?, unixepoch())`
+    )
+      .bind(repo, prNumber, action, reasoning.slice(0, 500))
+      .run();
+
+    if (action !== "escalate") return; // "skip" och "autofix" hanteras redan av coderabbit-queue/ingenting
+
+    const existing = await env.DB.prepare(
+      `SELECT escalation_count FROM escalated_threads WHERE repo = ? AND pr_number = ?`
+    )
+      .bind(repo, prNumber)
+      .first<{ escalation_count: number }>();
+    if ((existing?.escalation_count ?? 0) >= MAX_ESCALATIONS_PER_PR) {
+      console.error(`pull_request_review_thread: ${repo}#${prNumber} har redan eskalerats ${MAX_ESCALATIONS_PER_PR} ggr utan att lösas — ger upp, kräver manuell granskning`);
+      return;
+    }
+
+    // Atomär check-and-set: samma debounce-mönster som resten av ops-hub —
+    // bara en eskalering per repo+PR var 30:e minut, oavsett hur många
+    // trådar som blir olösta under den tiden.
+    const result = await env.DB.prepare(
+      `INSERT INTO escalated_threads (repo, pr_number, escalated_at, escalation_count) VALUES (?, ?, unixepoch(), 1)
+       ON CONFLICT(repo, pr_number) DO UPDATE SET escalated_at = excluded.escalated_at, escalation_count = escalated_threads.escalation_count + 1
+       WHERE excluded.escalated_at - escalated_threads.escalated_at >= ?`
+    )
+      .bind(repo, prNumber, ESCALATION_DEBOUNCE_SECONDS)
+      .run();
+    if (!result.meta.changes) return; // redan eskalerad senaste 30 min
+
+    const ok = await postClaudeEscalationComment(env, repo, prNumber, reasoning);
+    if (!ok) {
+      // Rulla tillbaka debounce-reservationen (men behåll räknaren orörd —
+      // detta försök räknas inte om kommentaren aldrig postades) så nästa
+      // event kan försöka igen direkt istället för att vänta ut hela
+      // 30-minuters-fönstret.
+      await env.DB.prepare(
+        `UPDATE escalated_threads SET escalated_at = 0, escalation_count = escalation_count - 1 WHERE repo = ? AND pr_number = ?`
+      )
+        .bind(repo, prNumber)
+        .run();
+    }
+  } catch (e) {
+    console.error(`pull_request_review_thread: hantering misslyckades för ${body?.repository?.full_name}#${body?.pull_request?.number}:`, e);
+  }
+}
+
+async function handleGitHubWebhook(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const raw = await req.text();
   const sig = req.headers.get("x-hub-signature-256");
   if (!(await verifyGitHubSignature(raw, sig, env.GITHUB_WEBHOOK_SECRET))) {
@@ -76,6 +207,10 @@ async function handleGitHubWebhook(req: Request, env: Env): Promise<Response> {
   )
     .bind(`${eventType}.${body?.action ?? ""}`, repo, triggers, payloadTrunc)
     .run();
+
+  if (eventType === "pull_request_review_thread" && body?.action === "unresolved") {
+    ctx.waitUntil(handleUnresolvedThread(env, body));
+  }
 
   return new Response("ok", { status: 202 });
 }
@@ -136,11 +271,11 @@ async function handleVpsStatus(env: Env): Promise<Response> {
   return Response.json({ sources: enriched });
 }
 
-async function route(req: Request, env: Env): Promise<Response> {
+async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(req.url);
 
   if (req.method === "POST" && url.pathname === "/webhook/github") {
-    return handleGitHubWebhook(req, env);
+    return handleGitHubWebhook(req, env, ctx);
   }
   if (req.method === "POST" && url.pathname === "/webhook/heartbeat") {
     return handleHeartbeat(req, env);
@@ -173,9 +308,9 @@ export default Sentry.withSentry(
     tracesSampleRate: 1.0,
   }),
   {
-    async fetch(req: Request, env: Env): Promise<Response> {
+    async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
       try {
-        return await route(req, env);
+        return await route(req, env, ctx);
       } catch (err) {
         console.error(err);
         Sentry.captureException(err);
