@@ -279,6 +279,7 @@ async function postClaudeEscalationComment(env: Env, repo: string, prNumber: num
     headers: {
       authorization: `Bearer ${env.GITHUB_TOKEN}`,
       accept: "application/vnd.github+json",
+      "content-type": "application/json",
       "user-agent": "ops-hub-worker",
     },
     body: JSON.stringify({
@@ -592,9 +593,10 @@ async function runHealthChecks(env: Env): Promise<HealthResult[]> {
     },
     {
       id: "api_me_json",
-      fix: "API:t svarar inte med giltig JSON — kolla politiker-webapp-app-loggarna.",
+      fix: "API:t svarar inte med HTTP 200 + giltig JSON — kolla politiker-webapp-app-loggarna.",
       run: async () => {
         const res = await fetchWithTimeout(`https://${POLITIKER_HOST}/api/me`);
+        if (!res.ok) return { ok: false, detail: `HTTP ${res.status}` };
         try {
           await res.json();
           return { ok: true, detail: `HTTP ${res.status}, giltig JSON` };
