@@ -279,6 +279,15 @@ ${commentBody.slice(0, 3000)}`;
 // konfigurationsbugg (t.ex. utgånget token) rulla tillbaka räknaren varje
 // gång och försöka om i all oändlighet, och MAX_ESCALATIONS_PER_PR skulle
 // aldrig få effekt.
+//
+// Medvetet INGEN maintainer-label/approval-spärr innan eskalering (skiljer
+// sig från ett CodeRabbit-autofix-förslag som lades till här): ops-hub
+// hanterar bara blixten85s egna repon, ingen extern publik contribution —
+// hotmodellen bakom det förslaget (godtycklig utomstående PR-författare
+// triggar en autonom agent-körning) gäller inte här. En sådan spärr skulle
+// dessutom göra escalate-grenen (till för fynd som KRÄVER ett mänskligt
+// beslut) i praktiken aldrig automatisk, eftersom en PR med den typen av
+// fynd sällan redan är godkänd.
 async function postClaudeEscalationComment(
   env: Env,
   repo: string,

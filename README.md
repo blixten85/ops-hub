@@ -77,7 +77,7 @@ handler.
 4. `wrangler secret put GITHUB_WEBHOOK_SECRET` — valfri sträng, samma används i steg 7
 5. `wrangler secret put HEARTBEAT_SECRET` — valfri sträng, delas till VPS:arna
 6. `wrangler secret put QUERY_SECRET` — valfri sträng, delas till allt som ska läsa `/coderabbit-quota` eller `/vps-status`
-6b. `wrangler secret put GITHUB_TOKEN` — fine-grained PAT med `issues:write` (och helst admin) på alla repon, används för auto-merge-armering och `@claude`-eskaleringskommentarer
+6b. `wrangler secret put GITHUB_TOKEN` — fine-grained PAT med `issues:write` och `pull-requests:write`, scopad till ENDAST de repon som hanteras av automationen (inte hela kontot), används för auto-merge-armering och `@claude`-eskaleringskommentarer
 6c. `wrangler secret put CF_ADMIN_TOKEN` — Cloudflare account-token som får hantera andra account-tokens (för veckovis förnyelse)
 6d. `wrangler secret put CF_READONLY_TOKEN` — Cloudflare account-token med läsrättigheter (Workers, D1, Access) för hälsokontrollerna
 6e. `wrangler secret put SLACK_WEBHOOK_URL` (eller `SLACK_BOT_TOKEN`) — valfritt, för utgående alerts från hälsokontroller/token-underhåll. Utan någon av dem loggas alerts bara internt (`postSlack` kastar aldrig, best effort).
