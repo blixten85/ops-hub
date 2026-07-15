@@ -273,7 +273,45 @@ ${commentBody.slice(0, 3000)}`;
 // autonom @claude-prompt öppnar för prompt injection (CWE-1427, flaggat av
 // CodeRabbit). Claude GitHub App:en läser redan själv PR:ens olösta trådar
 // när den blir taggad, så den behöver inte få texten återberättad här.
+//
+// VIKTIGT: @claude-eskalering endast tillåtet när PR:en har en maintainer-
+// signal (label eller approval) — förhindrar att untrusted reasoning från
+// AI-triage-steget triggar en autonom agent-körning på godtyckliga PR:er.
 async function postClaudeEscalationComment(env: Env, repo: string, prNumber: number): Promise<boolean> {
+  // Kontrollera om PR:en har godkänd maintainer-signal före eskalering.
+  const prRes = await fetchWithTimeout(`https://api.github.com/repos/${repo}/pulls/${prNumber}`, {
+    headers: {
+      authorization: `Bearer ${env.GITHUB_TOKEN}`,
+      accept: "application/vnd.github+json",
+      "user-agent": "ops-hub-worker",
+    },
+  });
+  if (!prRes.ok) {
+    console.error(`postClaudeEscalationComment: misslyckades hämta PR ${repo}#${prNumber}, HTTP ${prRes.status}`);
+    return false;
+  }
+  const pr = (await prRes.json()) as { labels?: { name: string }[] };
+  const hasMaintainerLabel = (pr.labels ?? []).some((l) => l.name === "maintainer" || l.name === "approved");
+
+  // Hämta PR-reviews för att kontrollera approval-status.
+  const reviewsRes = await fetchWithTimeout(`https://api.github.com/repos/${repo}/pulls/${prNumber}/reviews`, {
+    headers: {
+      authorization: `Bearer ${env.GITHUB_TOKEN}`,
+      accept: "application/vnd.github+json",
+      "user-agent": "ops-hub-worker",
+    },
+  });
+  const hasApproval =
+    reviewsRes.ok &&
+    ((await reviewsRes.json()) as { state?: string }[]).some((r) => r.state === "APPROVED");
+
+  if (!hasMaintainerLabel && !hasApproval) {
+    console.log(
+      `postClaudeEscalationComment: skippar @claude-eskalering för ${repo}#${prNumber} (ingen maintainer-label eller approval)`
+    );
+    return false;
+  }
+
   const res = await fetchWithTimeout(`https://api.github.com/repos/${repo}/issues/${prNumber}/comments`, {
     method: "POST",
     headers: {
