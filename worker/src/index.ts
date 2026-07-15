@@ -293,23 +293,33 @@ async function postClaudeEscalationComment(
   repo: string,
   prNumber: number
 ): Promise<{ ok: boolean; retryable: boolean }> {
-  const res = await fetchWithTimeout(`https://api.github.com/repos/${repo}/issues/${prNumber}/comments`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${env.GITHUB_TOKEN}`,
-      accept: "application/vnd.github+json",
-      "content-type": "application/json",
-      "user-agent": "ops-hub-worker",
-    },
-    body: JSON.stringify({
-      body: `@claude Ett CodeRabbit-fynd på denna PR har klassificerats som att det kräver ett mänskligt/arkitekturbeslut. Undersök de olösta review-trådarna och föreslå en lösning, eller förklara varför de kan avfärdas.`,
-    }),
-  });
-  if (!res.ok) {
-    console.error(`postClaudeEscalationComment: GitHub API svarade ${res.status} för ${repo}#${prNumber}`);
-    return { ok: false, retryable: res.status >= 500 };
+  // fetchWithTimeout kastar (AbortError) om anropet timear ut eller nätverket
+  // fallerar — utan denna try/catch skulle det undantaget hoppa förbi
+  // rollback-logiken i handleUnresolvedThread helt (fångas bara av dess
+  // yttre try/catch), vilket tyst förbrukar en eskaleringsplats för en
+  // transient timeout precis som om kommentaren faktiskt hade postats.
+  try {
+    const res = await fetchWithTimeout(`https://api.github.com/repos/${repo}/issues/${prNumber}/comments`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${env.GITHUB_TOKEN}`,
+        accept: "application/vnd.github+json",
+        "content-type": "application/json",
+        "user-agent": "ops-hub-worker",
+      },
+      body: JSON.stringify({
+        body: `@claude Ett CodeRabbit-fynd på denna PR har klassificerats som att det kräver ett mänskligt/arkitekturbeslut. Undersök de olösta review-trådarna och föreslå en lösning, eller förklara varför de kan avfärdas.`,
+      }),
+    });
+    if (!res.ok) {
+      console.error(`postClaudeEscalationComment: GitHub API svarade ${res.status} för ${repo}#${prNumber}`);
+      return { ok: false, retryable: res.status >= 500 };
+    }
+    return { ok: true, retryable: false };
+  } catch (e) {
+    console.error(`postClaudeEscalationComment: nätverksfel/timeout för ${repo}#${prNumber}:`, e);
+    return { ok: false, retryable: true };
   }
-  return { ok: true, retryable: false };
 }
 
 async function handleUnresolvedThread(env: Env, body: any): Promise<void> {
