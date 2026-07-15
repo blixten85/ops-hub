@@ -51,6 +51,19 @@ async function verifyGitHubSignature(
   return diff === 0;
 }
 
+// Wrapper för utgående fetch med per-request timeout (AbortController).
+// Förhindrar att en hängd uppström-tjänst (GitHub/Slack/Cloudflare) låser
+// workern på obestämd tid. Timern rensas alltid (try/finally) så den inte läcker.
+async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs = 10000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function triggersCodeRabbit(eventType: string, body: any): boolean {
   if (eventType === "pull_request") {
     return CODERABBIT_TRIGGERING_ACTIONS.pull_request.includes(body?.action);
@@ -74,7 +87,7 @@ const AUTOMERGE_PR_ACTIONS = ["opened", "synchronize", "reopened", "ready_for_re
 const AUTOMERGE_CHECK_CONCLUSIONS = ["success", "skipped"];
 
 async function githubGraphQL(env: Env, query: string, variables: Record<string, unknown>): Promise<any> {
-  const res = await fetch("https://api.github.com/graphql", {
+  const res = await fetchWithTimeout("https://api.github.com/graphql", {
     method: "POST",
     headers: {
       authorization: `Bearer ${env.GITHUB_TOKEN}`,
@@ -102,7 +115,7 @@ async function autoMergeCandidates(env: Env, eventType: string, body: any): Prom
     if (attached.length > 0) return attached.map((p) => p.number);
     // pull_requests[] är tomt för fork-PR:er — slå upp via head-SHA istället.
     const sha = body.check_run.head_sha;
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `https://api.github.com/repos/${body.repository.full_name}/commits/${sha}/pulls`,
       {
         headers: {
@@ -230,7 +243,19 @@ async function notifyOnCodeRabbitUnresolvedThread(env: Env, body: any): Promise<
       .run();
     if (!result.meta.changes) return; // redan notifierad senaste 30 min — undvik Slack-spam vid flera trådar
 
-    const { ts } = await postSlack(env, `🔍 CodeRabbit-fynd kräver beslut: ${repo}#${prNumber} — ${prUrl}`);
+    const { ok, ts } = await postSlack(env, `🔍 CodeRabbit-fynd kräver beslut: ${repo}#${prNumber} — ${prUrl}`);
+    if (!ok) {
+      // Slack-leverans misslyckades — rulla tillbaka debounce-reservation så
+      // nästa event kan försöka igen direkt, istället för att vänta ut hela
+      // 30-minuters-fönstret. Sätter notified_at=0 (långt förflutet).
+      await env.DB.prepare(
+        `UPDATE notified_threads SET notified_at = 0 WHERE repo = ? AND pr_number = ?`
+      )
+        .bind(repo, prNumber)
+        .run();
+      console.error(`pull_request_review_thread: Slack-leverans misslyckades för ${repo}#${prNumber}, debounce-reservation återställd`);
+      return;
+    }
     if (ts) {
       await env.DB.prepare(
         `UPDATE notified_threads SET slack_thread_ts = ? WHERE repo = ? AND pr_number = ?`
@@ -344,7 +369,7 @@ const SLACK_CHANNEL = "C0BD5U2RWD6";
 async function postSlack(env: Env, text: string): Promise<{ ok: boolean; ts: string | null }> {
   try {
     if (env.SLACK_BOT_TOKEN) {
-      const res = await fetch("https://slack.com/api/chat.postMessage", {
+      const res = await fetchWithTimeout("https://slack.com/api/chat.postMessage", {
         method: "POST",
         headers: {
           authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
@@ -360,7 +385,7 @@ async function postSlack(env: Env, text: string): Promise<{ ok: boolean; ts: str
       return { ok: true, ts: json.ts ?? null };
     }
     if (env.SLACK_WEBHOOK_URL) {
-      const res = await fetch(env.SLACK_WEBHOOK_URL, {
+      const res = await fetchWithTimeout(env.SLACK_WEBHOOK_URL, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ text }),
@@ -525,7 +550,7 @@ async function handleSlackWebhook(req: Request, env: Env, ctx: ExecutionContext)
 const CF_ACCOUNT_ID = "b74f8c0c6a92f3006483840cf27372fd";
 
 async function cfApi(token: string, method: string, path: string, body?: unknown): Promise<any> {
-  const res = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
+  const res = await fetchWithTimeout(`https://api.cloudflare.com/client/v4${path}`, {
     method,
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -633,7 +658,7 @@ async function runHealthChecks(env: Env): Promise<HealthResult[]> {
       id: "root_200",
       fix: "Kontrollera Worker-deployen (wrangler tail politiker-webapp-app) och custom domain-routing.",
       run: async () => {
-        const res = await fetch(`https://${POLITIKER_HOST}/`, { redirect: "manual" });
+        const res = await fetchWithTimeout(`https://${POLITIKER_HOST}/`, { redirect: "manual" });
         return { ok: res.status === 200, detail: `HTTP ${res.status}` };
       },
     },
@@ -641,7 +666,7 @@ async function runHealthChecks(env: Env): Promise<HealthResult[]> {
       id: "api_me_json",
       fix: "API:t svarar inte med giltig JSON — kolla politiker-webapp-app-loggarna.",
       run: async () => {
-        const res = await fetch(`https://${POLITIKER_HOST}/api/me`);
+        const res = await fetchWithTimeout(`https://${POLITIKER_HOST}/api/me`);
         try {
           await res.json();
           return { ok: true, detail: `HTTP ${res.status}, giltig JSON` };
