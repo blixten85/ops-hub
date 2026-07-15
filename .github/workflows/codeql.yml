@@ -1,9 +1,7 @@
 name: CodeQL
 
-# Statisk säkerhetsanalys av SSHCore + bastion-cli (root-paketet). Kör inte
-# mot App/ (Xcode-only) eller LinuxApp/ (eget paket) — root-paketet är där de
-# säkerhetskänsliga ytorna bor (SSH-auth, nyckelparsning, Docker-kommando-
-# validering mot injektion). Gratis för publika repon.
+# Statisk säkerhetsanalys av worker/src (TypeScript, Cloudflare Worker).
+# Gratis för publika repon.
 on:
   push:
     branches: [main]
@@ -15,8 +13,8 @@ on:
 
 jobs:
   analyze:
-    name: Analyze (swift)
-    runs-on: macos-latest
+    name: Analyze (javascript-typescript)
+    runs-on: ubuntu-latest
     permissions:
       security-events: write
       packages: read
@@ -30,13 +28,9 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4
         with:
-          languages: swift
-          build-mode: manual
-
-      - name: "Bygg (root-paketet: SSHCore + bastion-cli)"
-        run: swift build
+          languages: javascript-typescript
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4
         with:
-          category: "/language:swift"
+          category: "/language:javascript-typescript"
