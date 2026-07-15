@@ -273,7 +273,17 @@ ${commentBody.slice(0, 3000)}`;
 // autonom @claude-prompt öppnar för prompt injection (CWE-1427, flaggat av
 // CodeRabbit). Claude GitHub App:en läser redan själv PR:ens olösta trådar
 // när den blir taggad, så den behöver inte få texten återberättad här.
-async function postClaudeEscalationComment(env: Env, repo: string, prNumber: number): Promise<boolean> {
+// `retryable` skiljer transienta fel (nätverk/5xx — värt att rulla tillbaka
+// och försöka igen) från permanenta (401/403/404/422 — fel GITHUB_TOKEN eller
+// PR:en finns inte längre). Utan denna åtskillnad skulle en permanent
+// konfigurationsbugg (t.ex. utgånget token) rulla tillbaka räknaren varje
+// gång och försöka om i all oändlighet, och MAX_ESCALATIONS_PER_PR skulle
+// aldrig få effekt.
+async function postClaudeEscalationComment(
+  env: Env,
+  repo: string,
+  prNumber: number
+): Promise<{ ok: boolean; retryable: boolean }> {
   const res = await fetchWithTimeout(`https://api.github.com/repos/${repo}/issues/${prNumber}/comments`, {
     method: "POST",
     headers: {
@@ -288,9 +298,9 @@ async function postClaudeEscalationComment(env: Env, repo: string, prNumber: num
   });
   if (!res.ok) {
     console.error(`postClaudeEscalationComment: GitHub API svarade ${res.status} för ${repo}#${prNumber}`);
-    return false;
+    return { ok: false, retryable: res.status >= 500 };
   }
-  return true;
+  return { ok: true, retryable: false };
 }
 
 async function handleUnresolvedThread(env: Env, body: any): Promise<void> {
@@ -325,14 +335,16 @@ async function handleUnresolvedThread(env: Env, body: any): Promise<void> {
       .run();
     if (!result.meta.changes) return; // redan eskalerad senaste 30 min, eller max antal eskaleringar nått
 
-    const ok = await postClaudeEscalationComment(env, repo, prNumber);
-    if (!ok) {
-      // Rulla tillbaka debounce-reservationen (men behåll räknaren orörd —
-      // detta försök räknas inte om kommentaren aldrig postades) så nästa
-      // event kan försöka igen direkt istället för att vänta ut hela
-      // 30-minuters-fönstret.
+    const { ok, retryable } = await postClaudeEscalationComment(env, repo, prNumber);
+    if (!ok && retryable) {
+      // Rulla tillbaka debounce-reservationen OCH räknaren (med undre gräns
+      // 0, annars kan upprepade transienta fel driva räknaren negativ och
+      // effektivt kringgå MAX_ESCALATIONS_PER_PR) — bara för transienta fel.
+      // Permanenta fel (401/403/404 m.fl.) rullas INTE tillbaka: räknaren
+      // ska fortsätta stiga mot gränsen så en trasig konfiguration ger upp
+      // istället för att försöka om i all oändlighet.
       await env.DB.prepare(
-        `UPDATE escalated_threads SET escalated_at = 0, escalation_count = escalation_count - 1 WHERE repo = ? AND pr_number = ?`
+        `UPDATE escalated_threads SET escalated_at = 0, escalation_count = MAX(escalation_count - 1, 0) WHERE repo = ? AND pr_number = ?`
       )
         .bind(repo, prNumber)
         .run();
