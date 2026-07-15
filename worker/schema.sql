@@ -44,3 +44,15 @@ CREATE TABLE IF NOT EXISTS heartbeats (
   last_seen INTEGER NOT NULL,    -- unix epoch seconds
   details TEXT                   -- fri JSON: cpu/ram/disk/etc, källberoende
 );
+
+-- healthcheck_state: senaste status per healthcheck-kontroll (politiker.denied.se)
+-- används för transition-baserad alerting (Slacka bara vid OK→FAIL / FAIL→OK).
+-- since/last_alert är unix epoch-sekunder (INTEGER) — koden gör datumaritmetik
+-- på dem (t.ex. "fortfarande FAIL sedan Nh"), en TEXT-kolumn skulle bryta det.
+CREATE TABLE IF NOT EXISTS healthcheck_state (
+  check_id TEXT PRIMARY KEY,     -- t.ex. 'root_200', 'd1_politicians'
+  ok INTEGER NOT NULL,           -- 1 = OK, 0 = FAIL
+  since INTEGER NOT NULL,        -- unix epoch: när nuvarande status började
+  last_alert INTEGER,            -- unix epoch: senaste Slack-larm för denna kontroll (NULL om OK)
+  detail TEXT                    -- senaste detaljbeskrivning
+);
