@@ -1,0 +1,24 @@
+.gitignore
+  s_8850151e11397b::t_70fab619a53993 1
+worker/src/index.ts
+  s_8850151e11397b::t_70fab619a53993 18,821,823-830
+worker/wrangler.jsonc
+  s_8850151e11397b::t_70fab619a53993 33
+  s_8850151e11397b::t_5ad063d7197652 34-36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "18be1820ad7cc379c4f32336a37735dd668c36dd",
+  "prompts": {},
+  "sessions": {
+    "s_8850151e11397b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0b715bbe-66aa-4f93-ac74-3f76f2736de8",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Anders Eriksson <36226327+blixten85@users.noreply.github.com>"
+    }
+  }
+}
