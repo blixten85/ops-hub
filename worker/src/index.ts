@@ -823,6 +823,7 @@ export default Sentry.withSentry(
     tracePropagationTargets: [],
     enableLogs: true,
     environment: env.ENVIRONMENT ?? "production",
+    integrations: [Sentry.consoleLoggingIntegration({ levels: ["warn", "error"] })],
   }),
   {
     async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
