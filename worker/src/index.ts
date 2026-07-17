@@ -3,6 +3,7 @@ import * as Sentry from "@sentry/cloudflare";
 export interface Env {
   DB: D1Database;
   AI: Ai;
+  CF_VERSION_METADATA: WorkerVersionMetadata;
   GITHUB_ORG: string;
   GITHUB_WEBHOOK_SECRET: string;
   // PAT med issues:write och admin på alla repon — auto-merge-armering,
@@ -14,8 +15,7 @@ export interface Env {
   CF_READONLY_TOKEN: string;
   SLACK_BOT_TOKEN?: string;
   SLACK_WEBHOOK_URL?: string;
-  // Sentry-felspårning (allmän, ej AI Agent Monitoring). Sätts som secret.
-  SENTRY_DSN?: string;
+  ENVIRONMENT?: string;
 }
 
 function isAuthorizedQuery(req: Request, env: Env): boolean {
@@ -818,8 +818,12 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
 
 export default Sentry.withSentry(
   (env: Env) => ({
-    dsn: env.SENTRY_DSN,
+    dsn: "https://13ac953d361081f2a767b7eac53bc06b@o4511717224480768.ingest.de.sentry.io/4511733213954128",
     tracesSampleRate: 1.0,
+    tracePropagationTargets: [],
+    enableLogs: true,
+    environment: env.ENVIRONMENT ?? "production",
+    integrations: [Sentry.consoleLoggingIntegration({ levels: ["warn", "error"] })],
   }),
   {
     async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {

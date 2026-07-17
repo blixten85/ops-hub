@@ -10,7 +10,9 @@
   },
   "vars": {
     // Hostnamnsdel av GitHub org-appen (informativt, inte hemligt)
-    "GITHUB_ORG": "blixten85"
+    "GITHUB_ORG": "blixten85",
+    // Sentry-environment-tagg; överstyrs vid behov för dev/lokala deploys
+    "ENVIRONMENT": "production"
   },
   "d1_databases": [
     {
@@ -30,11 +32,14 @@
   // main inte tyst tar bort dem). Se worker/src/index.ts scheduled()-switchen.
   "triggers": {
     "crons": ["*/5 * * * *", "0 7 * * *", "0 7 * * 1"]
+  },
+  "upload_source_maps": true,
+  "version_metadata": {
+    "binding": "CF_VERSION_METADATA"
   }
   // Secrets (wrangler secret put, körs manuellt av användaren):
   //   GITHUB_WEBHOOK_SECRET — delad hemlighet satt när org-webhooken skapas
   //   HEARTBEAT_SECRET      — delad hemlighet för /webhook/heartbeat (mp100, VPS:ar postar med denna)
-  //   SENTRY_DSN            — allmän felspårning (ej AI Agent Monitoring), samma Sentry-projekt-mönster som product-describer-cloudflare
   //   GITHUB_TOKEN          — fine-grained PAT, issues:write på alla repon, för auto-merge-armering och @claude-eskalering
   //   CF_ADMIN_TOKEN        — Cloudflare account-token, veckovis förnyelse av MANAGED_CF_TOKENS
   //   CF_READONLY_TOKEN     — Cloudflare account-token, läser Workers/D1/Access-status för hälsokontroller
