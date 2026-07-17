@@ -820,12 +820,7 @@ export default Sentry.withSentry(
   (env: Env) => ({
     dsn: "https://13ac953d361081f2a767b7eac53bc06b@o4511717224480768.ingest.de.sentry.io/4511733213954128",
     tracesSampleRate: 1.0,
-    tracePropagationTargets: [
-      /^https:\/\/api\.github\.com/,
-      /^https:\/\/hooks\.slack\.com/,
-      /^https:\/\/slack\.com\/api/,
-      /^https:\/\/api\.cloudflare\.com/,
-    ],
+    tracePropagationTargets: [],
     enableLogs: true,
     environment: env.ENVIRONMENT ?? "production",
   }),
