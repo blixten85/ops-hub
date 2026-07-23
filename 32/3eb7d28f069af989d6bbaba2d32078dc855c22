@@ -1,0 +1,70 @@
+.cubic/wiki/01-s-overview/03-developer-conventions.md
+  s_1c2bc845e6a689::t_48c8369e7589a3 125
+  s_1c2bc845e6a689::t_74403e69a32ffc 131
+  s_1c2bc845e6a689::t_f1e8750bce6cd3 61
+  s_1c2bc845e6a689::t_1a2d4e68b6bad5 126
+.cubic/wiki/01-s-overview/01-home-overview.md
+  s_1c2bc845e6a689::t_fa6a889d4203eb 11-16
+.cubic/wiki/01-s-overview/02-setup-guide.md
+  s_1c2bc845e6a689::t_02187aca434019 11-16
+.cubic/wiki/02-s-architecture/01-architecture.md
+  s_1c2bc845e6a689::t_d07d39d1137ac2 11-16
+.cubic/wiki/02-s-architecture/02-security-policy.md
+  s_1c2bc845e6a689::t_fe500bc751223e 11-14,16
+.cubic/wiki/04-s-feat-github/01-github-webhooks.md
+  s_1c2bc845e6a689::t_547e43e10391d6 11-14
+.cubic/wiki/04-s-feat-github/02-coderabbit-quota.md
+  s_1c2bc845e6a689::t_1b6d9fae05a749 11-14
+.cubic/wiki/04-s-feat-github/03-ai-triage.md
+  s_1c2bc845e6a689::t_a2c7891f1e5004 11-15
+.cubic/wiki/04-s-feat-github/04-auto-merge-arming.md
+  s_1c2bc845e6a689::t_71f9d2adc411ad 11-13,15
+.cubic/wiki/05-s-feat-infra/01-vps-heartbeat.md
+  s_1c2bc845e6a689::t_14f0558bb3aefd 11-16,66
+.cubic/wiki/05-s-feat-infra/02-health-checks.md
+  s_1c2bc845e6a689::t_f44e29e7eb9e75 11-15
+.cubic/wiki/05-s-feat-infra/03-token-maintenance.md
+  s_1c2bc845e6a689::t_392d6216ae2908 11-15
+.cubic/wiki/05-s-feat-infra/04-slack-alerts.md
+  s_1c2bc845e6a689::t_edd44679d9b358 11-15
+.cubic/wiki/06-s-data/01-database-schema.md
+  s_1c2bc845e6a689::t_c98728f1669de0 11-16
+.cubic/wiki/07-s-backend/01-api-endpoints.md
+  s_1c2bc845e6a689::t_2fb86092248f72 11-15
+.cubic/wiki/07-s-backend/02-hmac-auth.md
+  s_1c2bc845e6a689::t_a3ce7f61f1e373 11-15
+.cubic/wiki/07-s-backend/03-cron-jobs.md
+  s_1c2bc845e6a689::t_28c58ca9da9f06 11-15
+.cubic/wiki/08-s-ai/01-worker-ai-model.md
+  s_1c2bc845e6a689::t_448a8188334791 11-15
+.cubic/wiki/08-s-ai/02-claude-collaboration.md
+  s_1c2bc845e6a689::t_39b3166b94cfe0 11-15
+.cubic/wiki/09-s-deployment/01-deployment.md
+  s_1c2bc845e6a689::t_7587d0ca46bf0e 11-16
+.cubic/wiki/09-s-deployment/02-db-migrations.md
+  s_1c2bc845e6a689::t_88d7c2c4b21c9b 11-16
+.cubic/wiki/09-s-deployment/03-github-rulesets.md
+  s_1c2bc845e6a689::t_00f59f5af3b6a2 13-16
+.cubic/wiki/09-s-deployment/04-troubleshooting.md
+  s_1c2bc845e6a689::t_4d1b2b863e06a9 11-15
+.cubic/wiki/10-s-extensibility/01-extending-webhooks.md
+  s_1c2bc845e6a689::t_c973d0f9d3ce4f 11-16
+.cubic/wiki/10-s-extensibility/02-heartbeat-client.md
+  s_1c2bc845e6a689::t_c6652e483126af 11-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "323eb7d28f069af989d6bbaba2d32078dc855c22",
+  "prompts": {},
+  "sessions": {
+    "s_1c2bc845e6a689": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b7e5aa75-f353-4ff6-9e2a-8562f4261e66",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Anders Eriksson <36226327+blixten85@users.noreply.github.com>"
+    }
+  }
+}
