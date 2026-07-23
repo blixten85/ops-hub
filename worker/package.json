@@ -8,11 +8,11 @@
     "db:migrate:remote": "wrangler d1 execute ops-hub-db --remote --file=schema.sql"
   },
   "dependencies": {
-    "@sentry/cloudflare": "^10.66.0"
+    "@sentry/cloudflare": "^10.67.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260708.1",
+    "@cloudflare/workers-types": "^5.20260722.1",
     "typescript": "^7.0.2",
-    "wrangler": "^4.111.0"
+    "wrangler": "^4.113.0"
   }
 }
