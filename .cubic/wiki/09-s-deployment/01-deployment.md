@@ -8,12 +8,12 @@ wiki_page_id: "deployment"
 
 The following files were used as context for generating this wiki page:
 
-- [README.md](README.md)
-- [worker/package.json](worker/package.json)
-- [worker/src/index.ts](worker/src/index.ts)
-- [worker/schema.sql](worker/schema.sql)
-- [worker/tsconfig.json](worker/tsconfig.json)
-- [AGENTS.md](AGENTS.md)
+- [README.md](../../README.md)
+- [worker/package.json](../../worker/package.json)
+- [worker/src/index.ts](../../worker/src/index.ts)
+- [worker/schema.sql](../../worker/schema.sql)
+- [worker/tsconfig.json](../../worker/tsconfig.json)
+- [AGENTS.md](../../AGENTS.md)
 </details>
 
 # Cloudflare Wrangler Deployment

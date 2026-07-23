@@ -8,11 +8,11 @@ wiki_page_id: "auto-merge-arming"
 
 The following files were used as context for generating this wiki page:
 
-- [worker/src/index.ts](worker/src/index.ts)
-- [README.md](README.md)
-- [worker/schema.sql](worker/schema.sql)
+- [worker/src/index.ts](../../worker/src/index.ts)
+- [README.md](../../README.md)
+- [worker/schema.sql](../../worker/schema.sql)
 - [branch-ruleset-template.json](branch-ruleset-template.json)
-- [AGENTS.md](AGENTS.md)
+- [AGENTS.md](../../AGENTS.md)
 - [apply-ruleset.sh](apply-ruleset.sh)
 </details>
 

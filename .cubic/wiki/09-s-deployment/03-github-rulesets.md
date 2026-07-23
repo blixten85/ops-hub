@@ -10,10 +10,10 @@ The following files were used as context for generating this wiki page:
 
 - [apply-ruleset.sh](apply-ruleset.sh)
 - [branch-ruleset-template.json](branch-ruleset-template.json)
-- [worker/src/index.ts](worker/src/index.ts)
-- [README.md](README.md)
-- [AGENTS.md](AGENTS.md)
-- [worker/schema.sql](worker/schema.sql)
+- [worker/src/index.ts](../../worker/src/index.ts)
+- [README.md](../../README.md)
+- [AGENTS.md](../../AGENTS.md)
+- [worker/schema.sql](../../worker/schema.sql)
 </details>
 
 # GitHub Repository Configuration

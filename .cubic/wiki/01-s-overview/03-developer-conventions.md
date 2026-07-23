@@ -8,12 +8,12 @@ wiki_page_id: "developer-conventions"
 
 The following files were used as context for generating this wiki page:
 
-- [README.md](README.md)
-- [AGENTS.md](AGENTS.md)
-- [CLAUDE.md](CLAUDE.md)
-- [SECURITY.md](SECURITY.md)
-- [worker/src/index.ts](worker/src/index.ts)
-- [worker/schema.sql](worker/schema.sql)
+- [README.md](../../README.md)
+- [AGENTS.md](../../AGENTS.md)
+- [CLAUDE.md](../../CLAUDE.md)
+- [SECURITY.md](../../SECURITY.md)
+- [worker/src/index.ts](../../worker/src/index.ts)
+- [worker/schema.sql](../../worker/schema.sql)
 - [apply-ruleset.sh](apply-ruleset.sh)
 </details>
 
@@ -58,6 +58,7 @@ Sources: [worker/src/index.ts:700-726](worker/src/index.ts#L700-L726)
 AI agents (such as Claude) interacting with the repository operate under specific permissions to prevent accidental infrastructure degradation or security breaches.
 
 ### Allowed and Forbidden Actions
+
 | Category | Permitted Actions | Forbidden Actions |
 | :--- | :--- | :--- |
 | **Development** | Create branches, Modify code, Run tests, Open PRs | Push directly to main, Merge PRs, Delete branches |
@@ -119,13 +120,15 @@ erDiagram
         integer escalated_at
         integer escalation_count
     }
-    events ||--o{ escalated_threads : tracks
 ```
+
+`events` and `escalated_threads` are independent tables with no foreign key or shared key between them — `events` is keyed by `id`, `escalated_threads` by `(repo, pr_number)`.
 
 The schema is designed for high-frequency writes (webhooks) and efficient time-window queries (quota counting).
 Sources: [worker/schema.sql:1-55](worker/schema.sql#L1-L55)
 
 ### Schema Table Descriptions
+
 | Table | Purpose | Key Fields |
 | :--- | :--- | :--- |
 | `events` | Raw log of all incoming webhooks | `source`, `triggers_coderabbit`, `received_at` |

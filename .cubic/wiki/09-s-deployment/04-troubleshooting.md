@@ -8,11 +8,11 @@ wiki_page_id: "troubleshooting"
 
 The following files were used as context for generating this wiki page:
 
-- [README.md](README.md)
-- [worker/src/index.ts](worker/src/index.ts)
-- [worker/schema.sql](worker/schema.sql)
-- [AGENTS.md](AGENTS.md)
-- [SECURITY.md](SECURITY.md)
+- [README.md](../../README.md)
+- [worker/src/index.ts](../../worker/src/index.ts)
+- [worker/schema.sql](../../worker/schema.sql)
+- [AGENTS.md](../../AGENTS.md)
+- [SECURITY.md](../../SECURITY.md)
 - [apply-ruleset.sh](apply-ruleset.sh)
 </details>
 

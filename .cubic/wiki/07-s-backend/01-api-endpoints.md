@@ -8,11 +8,11 @@ wiki_page_id: "api-endpoints"
 
 The following files were used as context for generating this wiki page:
 
-- [worker/src/index.ts](worker/src/index.ts)
-- [README.md](README.md)
-- [worker/schema.sql](worker/schema.sql)
-- [AGENTS.md](AGENTS.md)
-- [clients/heartbeat.sh](clients/heartbeat.sh)
+- [worker/src/index.ts](../../worker/src/index.ts)
+- [README.md](../../README.md)
+- [worker/schema.sql](../../worker/schema.sql)
+- [AGENTS.md](../../AGENTS.md)
+- [clients/heartbeat.sh](../../clients/heartbeat.sh)
 </details>
 
 # Worker Router & Endpoints

@@ -8,12 +8,12 @@ wiki_page_id: "vps-heartbeat"
 
 The following files were used as context for generating this wiki page:
 
-- [worker/src/index.ts](worker/src/index.ts)
-- [README.md](README.md)
-- [worker/schema.sql](worker/schema.sql)
-- [clients/heartbeat.sh](clients/heartbeat.sh)
-- [AGENTS.md](AGENTS.md)
-- [CLAUDE.md](CLAUDE.md)
+- [worker/src/index.ts](../../worker/src/index.ts)
+- [README.md](../../README.md)
+- [worker/schema.sql](../../worker/schema.sql)
+- [clients/heartbeat.sh](../../clients/heartbeat.sh)
+- [AGENTS.md](../../AGENTS.md)
+- [CLAUDE.md](../../CLAUDE.md)
 </details>
 
 # VPS Heartbeat System
@@ -63,7 +63,7 @@ Sources: [worker/src/index.ts:344-388](worker/src/index.ts#L344-L388), [clients/
 | :--- | :--- | :--- |
 | **Ingestion Endpoint** | `POST /webhook/heartbeat` - Receives and validates status payloads. | [worker/src/index.ts:344](worker/src/index.ts#L344) |
 | **Query Endpoint** | `GET /vps-status` - Returns a JSON list of all monitored sources. | [worker/src/index.ts:377](worker/src/index.ts#L377) |
-| **Client Script** | `heartbeat.sh` - Bash script to gather local metrics and push to the Worker. | [clients/heartbeat.sh](clients/heartbeat.sh) |
+| **Client Script** | `heartbeat.sh` - Bash script to gather local metrics and push to the Worker. | [clients/heartbeat.sh](../../clients/heartbeat.sh) |
 | **Persistence** | `heartbeats` Table - D1 table storing source ID, status, and metadata. | [worker/schema.sql:41-47](worker/schema.sql#L41-L47) |
 
 ## Ingestion Logic

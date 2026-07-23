@@ -8,10 +8,10 @@ wiki_page_id: "coderabbit-quota"
 
 The following files were used as context for generating this wiki page:
 
-- [worker/src/index.ts](worker/src/index.ts)
-- [README.md](README.md)
-- [worker/schema.sql](worker/schema.sql)
-- [AGENTS.md](AGENTS.md)
+- [worker/src/index.ts](../../worker/src/index.ts)
+- [README.md](../../README.md)
+- [worker/schema.sql](../../worker/schema.sql)
+- [AGENTS.md](../../AGENTS.md)
 - [branch-ruleset-template.json](branch-ruleset-template.json)
 
 </details>

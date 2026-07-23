@@ -8,12 +8,12 @@ wiki_page_id: "security-policy"
 
 The following files were used as context for generating this wiki page:
 
-- [SECURITY.md](SECURITY.md)
-- [README.md](README.md)
-- [AGENTS.md](AGENTS.md)
-- [worker/src/index.ts](worker/src/index.ts)
+- [SECURITY.md](../../SECURITY.md)
+- [README.md](../../README.md)
+- [AGENTS.md](../../AGENTS.md)
+- [worker/src/index.ts](../../worker/src/index.ts)
 - [apply-ruleset.sh](apply-ruleset.sh)
-- [worker/schema.sql](worker/schema.sql)
+- [worker/schema.sql](../../worker/schema.sql)
 </details>
 
 # Security Architecture

@@ -8,11 +8,11 @@ wiki_page_id: "hmac-auth"
 
 The following files were used as context for generating this wiki page:
 
-- [worker/src/index.ts](worker/src/index.ts)
-- [README.md](README.md)
-- [SECURITY.md](SECURITY.md)
-- [AGENTS.md](AGENTS.md)
-- [clients/heartbeat.sh](clients/heartbeat.sh)
+- [worker/src/index.ts](../../worker/src/index.ts)
+- [README.md](../../README.md)
+- [SECURITY.md](../../SECURITY.md)
+- [AGENTS.md](../../AGENTS.md)
+- [clients/heartbeat.sh](../../clients/heartbeat.sh)
 </details>
 
 # Authentication & HMAC Verification

@@ -8,12 +8,12 @@ wiki_page_id: "setup-guide"
 
 The following files were used as context for generating this wiki page:
 
-- [README.md](README.md)
-- [worker/package.json](worker/package.json)
-- [worker/src/index.ts](worker/src/index.ts)
-- [worker/schema.sql](worker/schema.sql)
-- [clients/heartbeat.sh](clients/heartbeat.sh)
-- [AGENTS.md](AGENTS.md)
+- [README.md](../../README.md)
+- [worker/package.json](../../worker/package.json)
+- [worker/src/index.ts](../../worker/src/index.ts)
+- [worker/schema.sql](../../worker/schema.sql)
+- [clients/heartbeat.sh](../../clients/heartbeat.sh)
+- [AGENTS.md](../../AGENTS.md)
 </details>
 
 # Getting Started & Setup

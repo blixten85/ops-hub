@@ -8,12 +8,12 @@ wiki_page_id: "db-migrations"
 
 The following files were used as context for generating this wiki page:
 
-- [worker/schema.sql](worker/schema.sql)
-- [worker/package.json](worker/package.json)
-- [README.md](README.md)
-- [worker/src/index.ts](worker/src/index.ts)
-- [AGENTS.md](AGENTS.md)
-- [CLAUDE.md](CLAUDE.md)
+- [worker/schema.sql](../../worker/schema.sql)
+- [worker/package.json](../../worker/package.json)
+- [README.md](../../README.md)
+- [worker/src/index.ts](../../worker/src/index.ts)
+- [AGENTS.md](../../AGENTS.md)
+- [CLAUDE.md](../../CLAUDE.md)
 </details>
 
 # Database Migrations

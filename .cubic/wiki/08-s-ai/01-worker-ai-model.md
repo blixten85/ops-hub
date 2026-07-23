@@ -8,11 +8,11 @@ wiki_page_id: "worker-ai-model"
 
 The following files were used as context for generating this wiki page:
 
-- [worker/src/index.ts](worker/src/index.ts)
-- [worker/schema.sql](worker/schema.sql)
-- [README.md](README.md)
-- [AGENTS.md](AGENTS.md)
-- [worker/package.json](worker/package.json)
+- [worker/src/index.ts](../../worker/src/index.ts)
+- [worker/schema.sql](../../worker/schema.sql)
+- [README.md](../../README.md)
+- [AGENTS.md](../../AGENTS.md)
+- [worker/package.json](../../worker/package.json)
 </details>
 
 # Worker AI Integration

@@ -8,12 +8,12 @@ wiki_page_id: "extending-webhooks"
 
 The following files were used as context for generating this wiki page:
 
-- [worker/src/index.ts](worker/src/index.ts)
-- [README.md](README.md)
-- [worker/schema.sql](worker/schema.sql)
-- [AGENTS.md](AGENTS.md)
-- [CLAUDE.md](CLAUDE.md)
-- [clients/heartbeat.sh](clients/heartbeat.sh)
+- [worker/src/index.ts](../../worker/src/index.ts)
+- [README.md](../../README.md)
+- [worker/schema.sql](../../worker/schema.sql)
+- [AGENTS.md](../../AGENTS.md)
+- [CLAUDE.md](../../CLAUDE.md)
+- [clients/heartbeat.sh](../../clients/heartbeat.sh)
 </details>
 
 # Adding New Webhook Sources

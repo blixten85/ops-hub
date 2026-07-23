@@ -8,11 +8,11 @@ wiki_page_id: "heartbeat-client"
 
 The following files were used as context for generating this wiki page:
 
-- [README.md](README.md)
-- [worker/src/index.ts](worker/src/index.ts)
-- [clients/heartbeat.sh](clients/heartbeat.sh)
-- [worker/schema.sql](worker/schema.sql)
-- [AGENTS.md](AGENTS.md)
+- [README.md](../../README.md)
+- [worker/src/index.ts](../../worker/src/index.ts)
+- [clients/heartbeat.sh](../../clients/heartbeat.sh)
+- [worker/schema.sql](../../worker/schema.sql)
+- [AGENTS.md](../../AGENTS.md)
 </details>
 
 # Integrating VPS Clients

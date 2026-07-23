@@ -8,12 +8,12 @@ wiki_page_id: "database-schema"
 
 The following files were used as context for generating this wiki page:
 
-- [worker/schema.sql](worker/schema.sql)
-- [worker/src/index.ts](worker/src/index.ts)
-- [README.md](README.md)
-- [AGENTS.md](AGENTS.md)
-- [worker/package.json](worker/package.json)
-- [clients/heartbeat.sh](clients/heartbeat.sh)
+- [worker/schema.sql](../../worker/schema.sql)
+- [worker/src/index.ts](../../worker/src/index.ts)
+- [README.md](../../README.md)
+- [AGENTS.md](../../AGENTS.md)
+- [worker/package.json](../../worker/package.json)
+- [clients/heartbeat.sh](../../clients/heartbeat.sh)
 </details>
 
 # D1 Database Schema

@@ -8,11 +8,11 @@ wiki_page_id: "cron-jobs"
 
 The following files were used as context for generating this wiki page:
 
-- [worker/src/index.ts](worker/src/index.ts)
-- [README.md](README.md)
-- [worker/schema.sql](worker/schema.sql)
-- [clients/heartbeat.sh](clients/heartbeat.sh)
-- [worker/package.json](worker/package.json)
+- [worker/src/index.ts](../../worker/src/index.ts)
+- [README.md](../../README.md)
+- [worker/schema.sql](../../worker/schema.sql)
+- [clients/heartbeat.sh](../../clients/heartbeat.sh)
+- [worker/package.json](../../worker/package.json)
 </details>
 
 # Cron Jobs Configuration
