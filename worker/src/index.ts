@@ -53,6 +53,25 @@ async function verifyGitHubSignature(
   return diff === 0;
 }
 
+// Retry-wrapper för D1-anrop som kan misslyckas med transienta nätverksfel.
+// Försöker upp till `attempts` gånger med en kort paus emellan.
+async function retryD1<T>(fn: () => Promise<T>, attempts = 3, delayMs = 200): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`retryD1: attempt ${i + 1} failed: ${msg}`);
+      if (i < attempts - 1) {
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 // Wrapper för utgående fetch med per-request timeout (AbortController).
 // Förhindrar att en hängd uppström-tjänst (GitHub/Slack/Cloudflare) låser
 // workern på obestämd tid. Timern rensas alltid (try/finally) så den inte läcker.
@@ -415,13 +434,15 @@ async function handleHeartbeat(req: Request, env: Env): Promise<Response> {
   if (!body.source_id || !body.status) {
     return new Response("source_id and status required", { status: 400 });
   }
-  await env.DB.prepare(
-    `INSERT INTO heartbeats (source_id, status, last_seen, details)
-     VALUES (?, ?, unixepoch(), ?)
-     ON CONFLICT(source_id) DO UPDATE SET status = excluded.status, last_seen = excluded.last_seen, details = excluded.details`
-  )
-    .bind(body.source_id, body.status, JSON.stringify(body.details ?? {}))
-    .run();
+  await retryD1(() =>
+    env.DB.prepare(
+      `INSERT INTO heartbeats (source_id, status, last_seen, details)
+       VALUES (?, ?, unixepoch(), ?)
+       ON CONFLICT(source_id) DO UPDATE SET status = excluded.status, last_seen = excluded.last_seen, details = excluded.details`
+    )
+      .bind(body.source_id, body.status, JSON.stringify(body.details ?? {}))
+      .run()
+  );
   return new Response("ok", { status: 202 });
 }
 
