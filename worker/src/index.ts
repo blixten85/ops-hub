@@ -430,7 +430,12 @@ async function handleHeartbeat(req: Request, env: Env): Promise<Response> {
   if (auth !== `Bearer ${env.HEARTBEAT_SECRET}`) {
     return new Response("unauthorized", { status: 401 });
   }
-  const body = (await req.json()) as { source_id?: string; status?: string; details?: unknown };
+  let body: { source_id?: string; status?: string; details?: unknown };
+  try {
+    body = (await req.json()) as { source_id?: string; status?: string; details?: unknown };
+  } catch {
+    return new Response("invalid JSON", { status: 400 });
+  }
   if (!body.source_id || !body.status) {
     return new Response("source_id and status required", { status: 400 });
   }
