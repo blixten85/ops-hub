@@ -11,7 +11,6 @@
   "vars": {
     // Hostnamnsdel av GitHub org-appen (informativt, inte hemligt)
     "GITHUB_ORG": "blixten85",
-    // Sentry-environment-tagg; överstyrs vid behov för dev/lokala deploys
     "ENVIRONMENT": "production"
   },
   "d1_databases": [
