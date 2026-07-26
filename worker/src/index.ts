@@ -1,4 +1,3 @@
-import * as Sentry from "@sentry/cloudflare";
 
 export interface Env {
   DB: D1Database;
@@ -842,22 +841,12 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   return new Response("not found", { status: 404 });
 }
 
-export default Sentry.withSentry(
-  (env: Env) => ({
-    dsn: "https://13ac953d361081f2a767b7eac53bc06b@o4511717224480768.ingest.de.sentry.io/4511733213954128",
-    tracesSampleRate: 1.0,
-    tracePropagationTargets: [],
-    enableLogs: true,
-    environment: env.ENVIRONMENT ?? "production",
-    integrations: [Sentry.consoleLoggingIntegration({ levels: ["warn", "error"] })],
-  }),
-  {
+export default {
     async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
       try {
         return await route(req, env, ctx);
       } catch (err) {
         console.error(err);
-        Sentry.captureException(err);
         return new Response("internal error", { status: 500 });
       }
     },
@@ -877,5 +866,4 @@ export default Sentry.withSentry(
           console.warn("scheduled: okänt cron-uttryck:", event.cron);
       }
     },
-  } satisfies ExportedHandler<Env>,
-);
+  } satisfies ExportedHandler<Env>;

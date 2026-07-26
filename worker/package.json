@@ -7,9 +7,6 @@
     "db:migrate:local": "wrangler d1 execute ops-hub-db --local --file=schema.sql",
     "db:migrate:remote": "wrangler d1 execute ops-hub-db --remote --file=schema.sql"
   },
-  "dependencies": {
-    "@sentry/cloudflare": "^10.68.0"
-  },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260726.1",
     "typescript": "^7.0.2",
