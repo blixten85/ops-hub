@@ -11,7 +11,9 @@
   "vars": {
     // Hostnamnsdel av GitHub org-appen (informativt, inte hemligt)
     "GITHUB_ORG": "blixten85",
-    "ENVIRONMENT": "production"
+    "ENVIRONMENT": "production",
+    "ALERT_EMAIL_TO": "anders.eriksson@denied.se",
+    "ALERT_EMAIL_FROM": "ops-hub <ops@send.denied.se>"
   },
   "d1_databases": [
     {
@@ -37,11 +39,9 @@
     "binding": "CF_VERSION_METADATA"
   }
   // Secrets (wrangler secret put, körs manuellt av användaren):
-  //   GITHUB_WEBHOOK_SECRET — delad hemlighet satt när org-webhooken skapas
-  //   HEARTBEAT_SECRET      — delad hemlighet för /webhook/heartbeat (mp100, VPS:ar postar med denna)
-  //   GITHUB_TOKEN          — fine-grained PAT, issues:write på alla repon, för auto-merge-armering och @claude-eskalering
-  //   CF_ADMIN_TOKEN        — Cloudflare account-token, veckovis förnyelse av MANAGED_CF_TOKENS
-  //   CF_READONLY_TOKEN     — Cloudflare account-token, läser Workers/D1/Access-status för hälsokontroller
-  //   SLACK_BOT_TOKEN       — valfri, chat.postMessage för utgående alerts (annars SLACK_WEBHOOK_URL som fallback)
-  //   SLACK_WEBHOOK_URL     — valfri, incoming webhook-fallback för utgående alerts
+  //   GITHUB_WEBHOOK_SECRET          — delad hemlighet satt när org-webhooken skapas
+  //   HEARTBEAT_SECRET               — delad hemlighet för /webhook/heartbeat (mp100, VPS:ar postar med denna)
+  //   GITHUB_TOKEN                   — fine-grained PAT, issues:write på alla repon, för auto-merge-armering och @claude-eskalering
+  //   POLITIKER_WEBAPP_READONLY_TOKEN — Cloudflare-token "politiker-webapp -- readonly" (D1/Workers/Access Read), läser status för hälsokontroller
+  //   RESEND_API_KEY                 — valfri, för utgående larm-mejl (notify()); saknas den loggas larmet bara, kraschar inte
 }
