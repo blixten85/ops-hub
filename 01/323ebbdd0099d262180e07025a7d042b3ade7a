@@ -1,0 +1,21 @@
+worker/src/index.ts
+  s_a7d7d357735ad2::t_21454b1001c618 13-18,492-495,497,499-501,503-510,512,514-515,536-541,544-549,554-555,607,622,635,650,721,724,727,736,739,741-742,796-797
+worker/wrangler.jsonc
+  s_a7d7d357735ad2::t_ffcb0ee69c6355 14-16,42-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "01323ebbdd0099d262180e07025a7d042b3ade7a",
+  "prompts": {},
+  "sessions": {
+    "s_a7d7d357735ad2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "01012648-7a48-4f93-9033-1842911a0230",
+        "model": "unknown"
+      },
+      "human_author": "Anders Eriksson <36226327+blixten85@users.noreply.github.com>"
+    }
+  }
+}
